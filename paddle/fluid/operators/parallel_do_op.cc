@@ -157,7 +157,6 @@ class ParallelDoOp : public framework::OperatorBase {
     for (size_t place_idx = 0; place_idx < sub_scopes.size(); ++place_idx) {
       auto &place = places[place_idx];
       auto *cur_scope = sub_scopes[place_idx];
-
       workers.emplace_back(framework::Async([program, cur_scope, place, block] {
         framework::Executor executor(place);
         executor.Run(*program, cur_scope, block->ID(),

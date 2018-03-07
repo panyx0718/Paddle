@@ -19,6 +19,10 @@ limitations under the License. */
 namespace paddle {
 namespace framework {
 
+namespace {
+std::mutex create_op_mu;
+}
+
 std::unique_ptr<OperatorBase> OpRegistry::CreateOp(
     const std::string& type, const VariableNameMap& inputs,
     const VariableNameMap& outputs, AttributeMap attrs) {
@@ -60,6 +64,7 @@ std::unique_ptr<OperatorBase> OpRegistry::CreateOp(
 }
 
 std::unique_ptr<OperatorBase> OpRegistry::CreateOp(const OpDesc& op_desc) {
+  std::lock_guard<std::mutex> l(create_op_mu);
   return CreateOp(op_desc.Type(), op_desc.Inputs(), op_desc.Outputs(),
                   op_desc.GetAttrMap());
 }

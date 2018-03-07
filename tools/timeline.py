@@ -121,19 +121,20 @@ class Timeline(object):
 
     def _allocate_pids(self):
         for event in self._profile_pb.events:
-            if event.device_id not in self._devices:
+            if (event.device_id, event.stream_id) not in self._devices:
                 pid = self._allocate_pid()
-                self._devices[event.device_id] = pid
+                self._devices[(event.device_id, event.stream_id)] = pid
                 if event.device_id >= 0:
-                    self._chrome_trace.emit_pid("gpu:%s:stream:%d" %
-                                                (pid, event.stream_id), pid)
+                    self._chrome_trace.emit_pid(
+                        "gpu:%s:stream:%d" %
+                        (event.device_id, event.stream_id), pid)
                 elif event.device_id == -1:
                     self._chrome_trace.emit_pid("cpu:thread_hash:%d" %
                                                 event.stream_id, pid)
 
     def _allocate_events(self):
         for event in self._profile_pb.events:
-            pid = self._devices[event.device_id]
+            pid = self._devices[(event.device_id, event.stream_id)]
             args = {'name': event.name}
             if event.memcopy.bytes > 0:
                 args = {'mem_bytes': event.memcopy.bytes}
@@ -159,7 +160,7 @@ if args.timeline_path:
 with open(profile_path, 'r') as f:
     profile_s = f.read()
     profile_pb = profiler_pb2.Profile()
-    text_format.Merge(profile_s, profile_pb)
+    profile_pb.ParseFromString(profile_s)
 
 tl = Timeline(profile_pb)
 with open(timeline_path, 'w') as f:

@@ -53,6 +53,7 @@ message OpDesc {
     repeated string arguments = 2;
   };
 
+  optional string unique_name = 14;
   required string type = 3;
   repeated Var inputs = 1;
   repeated Var outputs = 2;

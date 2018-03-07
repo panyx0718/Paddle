@@ -24,6 +24,10 @@ DECLARE_double(fraction_of_gpu_memory_to_use);
 
 namespace paddle {
 namespace memory {
+namespace {
+std::mutex mu;
+std::mutex cpu_mu;
+}
 
 using BuddyAllocator = detail::BuddyAllocator;
 
@@ -39,6 +43,7 @@ BuddyAllocator* GetCPUBuddyAllocator() {
 
 template <>
 void* Alloc<platform::CPUPlace>(platform::CPUPlace place, size_t size) {
+  std::lock_guard<std::mutex> l(cpu_mu);
   VLOG(10) << "Allocate " << size << " bytes on " << platform::Place(place);
   void* p = GetCPUBuddyAllocator()->Alloc(size);
   VLOG(10) << "  pointer=" << p;
@@ -47,6 +52,7 @@ void* Alloc<platform::CPUPlace>(platform::CPUPlace place, size_t size) {
 
 template <>
 void Free<platform::CPUPlace>(platform::CPUPlace place, void* p) {
+  std::lock_guard<std::mutex> l(cpu_mu);
   VLOG(10) << "Free pointer=" << p << " on " << platform::Place(place);
   GetCPUBuddyAllocator()->Free(p);
 }
@@ -89,8 +95,18 @@ size_t Used<platform::CUDAPlace>(platform::CUDAPlace place) {
 
 template <>
 void* Alloc<platform::CUDAPlace>(platform::CUDAPlace place, size_t size) {
+  std::lock_guard<std::mutex> l(mu);
+  // fprintf(stderr, "Allocating %lu, Cur: %lu\n", size, memory_usage(place));
   auto* buddy_allocator = GetGPUBuddyAllocator(place.device);
   auto* ptr = buddy_allocator->Alloc(size);
+  /*
+  if (!ptr) {
+    fprintf(stderr, "Allocation failed %lu, Cur: %lu\n",
+            size, memory_usage(place));
+  } else {
+    fprintf(stderr, "Allocation success %lu, Cur: %lu\n",
+            size, memory_usage(place));
+  }*/
   if (ptr == nullptr) {
     int cur_dev = platform::GetCurrentDeviceId();
     platform::SetDeviceId(place.device);
@@ -109,6 +125,8 @@ void* Alloc<platform::CUDAPlace>(platform::CUDAPlace place, size_t size) {
 
 template <>
 void Free<platform::CUDAPlace>(platform::CUDAPlace place, void* p) {
+  std::lock_guard<std::mutex> l(mu);
+  // fprintf(stderr, "Freeing\n");
   GetGPUBuddyAllocator(place.device)->Free(p);
 }
 

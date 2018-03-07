@@ -54,7 +54,7 @@ class ThreadPool {
   template <typename Callback>
   std::future<void> Run(Callback fn) {
     auto f = this->RunAndGetException(fn);
-    return std::async(std::launch::deferred, ExceptionHandler(std::move(f)));
+    return std::async(std::launch::async, ExceptionHandler(std::move(f)));
   }
 
   template <typename Callback>
@@ -67,10 +67,11 @@ class ThreadPool {
       } catch (platform::EnforceNotMet ex) {
         return std::unique_ptr<platform::EnforceNotMet>(
             new platform::EnforceNotMet(ex));
-      } catch (...) {
+      } catch (const std::exception& e) {
+        LOG(FATAL) << " a standard exception was caught: " << e.what();
         LOG(FATAL)
             << "Unexpected exception is catched in thread pool. All "
-               "throwable exception in Fluid should be an EnforceNotMet.";
+                "throwable exception in Fluid should be an EnforceNotMet.";
       }
       return nullptr;
     });

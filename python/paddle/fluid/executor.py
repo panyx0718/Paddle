@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import sys
 import numpy as np
 import contextlib
 from framework import Program, default_main_program, Variable
@@ -179,6 +180,102 @@ def get_program_cache_key(feed, fetch_list):
     return str(feed_var_names + fetch_var_names)
 
 
+
+def find_loops():
+    pass
+
+def analyze_dependency(program):
+    output_to_op = dict()
+    op_idx = dict()
+    ncclInit = None
+
+    idx = 0
+    should_print0 = False
+    for block in program.blocks:
+        for op in block.ops:
+            # if 'ncclInit' in op.desc.unique_name():
+            #     should_print0 = True
+            op.desc.set_unique_name(block.idx)
+            op_idx[op.desc.unique_name()] = idx
+            idx += 1
+            if 'ncclInit' in op.desc.unique_name():
+                assert not ncclInit
+                ncclInit = op
+
+            for output_name in op.output_names:
+                for output_arg in op.output(output_name):
+                    if should_print0:
+                        sys.stderr.write('ncclInit output %s\n' % output_arg)
+                    # if output_arg in output_to_op:
+                    #     sys.stderr.write('!!!!!%s duplicated\n' % output_arg)
+                    if output_arg == 'fetch':
+                        sys.stderr.write('!!!!!%s output from %s\n' %
+                                         (output_arg, op.type))
+                    if output_arg not in output_to_op:
+                        output_to_op[output_arg] = []
+                    output_to_op[output_arg].append(op)
+            should_print0 = False
+
+    should_print = False
+    for block in program.blocks:
+        for op in block.ops:
+            # if "nccl" in op.desc.unique_name():
+            #     sys.stderr.write('nccl: %s\n' % op.desc.unique_name())
+            #     should_print = True
+            if 'parallel_do_grad' in op.desc.unique_name():
+                ncclInit.desc.add_dependent(op.desc)
+                sys.stderr.write('%s add dependent %s\n' %
+                                 (ncclInit.desc.unique_name(),
+                                  op.desc.unique_name()))
+            for input_name in op.input_names:
+                for input_arg in op.input(input_name):
+                    if should_print:
+                        sys.stderr.write('nccl input_arg: %s\n' % input_arg)
+                    if input_arg not in output_to_op:
+                        if should_print:
+                            sys.stderr.write('1111\n')
+                        # sys.stderr.write(
+                        #     '!!!!!%s not output op\n' % input_arg)
+                        continue
+                    for output_op in output_to_op[input_arg]:
+                        if (op_idx[output_op.desc.unique_name()] >=
+                            op_idx[op.desc.unique_name()]):
+                            if should_print:
+                                sys.stderr.write(
+                                    '22222 %s %s %d %d\n' % (
+                                        op.desc.unique_name(),
+                                        output_op.desc.unique_name(),
+                                        op_idx[output_op.desc.unique_name()],
+                                        op_idx[op.desc.unique_name()]))
+                            continue
+                        if output_op.block.idx != op.block.idx:
+                            if should_print:
+                                sys.stderr.write('33333 %d %d\n' %
+                                                 (output_op.block.idx,
+                                                  op.block.idx))
+                            continue
+                        # sys.stderr.write('adding %s depends on %s\n' % (
+                        #     op.desc.unique_name(),
+                        #     output_to_op[input_arg].desc.unique_name()))
+                        output_op.desc.add_dependent(op.desc)
+            should_print = False
+    """        
+    op_nexts = dict()
+    op_previous = dict()
+    for block in program.blocks:
+        for op in block.ops:
+            nexts = op.desc.all_dep_ops()
+            op_nexts[op.desc.unique_name()] = nexts
+            for n in nexts:
+                if n not in op_previous:
+                    op_previous[n] = []
+                op_previous[n].append(op.desc.unique_name())
+    for op, previous in op_previous.iteritems():
+        sys.stderr.write('%s previous %s\n' % (op, ','.join(previous)))
+    """
+    # sys.stderr.write('%s' % program)
+
+
 class Executor(object):
     def __init__(self, places):
         if not isinstance(places, list) and not isinstance(places, tuple):
@@ -194,6 +291,7 @@ class Executor(object):
         self.executor = core.Executor(act_places[0])
         self.places = places
         self.program_caches = dict()
+        self._analyzed = set()
 
     def aslodtensor(self, data):
         def accumulate(data):
@@ -291,6 +389,7 @@ class Executor(object):
         if program_cache is None:
             program_cache = program.clone()
 
+
             if use_program_cache:
                 self.program_caches[program_cache_key] = program_cache
 
@@ -345,6 +444,11 @@ class Executor(object):
                 core.set_feed_variable(scope, cur_feed, feed_var_name, idx)
             else:
                 break
+
+        if not program_cache in self._analyzed:
+            analyze_dependency(program_cache)
+            self._analyzed.add(program_cache)
+            sys.stderr.write('analyzed a program\n')
 
         self.executor.run(program_cache.desc, scope, 0, True, True)
         outs = [

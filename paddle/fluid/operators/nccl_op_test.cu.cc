@@ -32,7 +32,7 @@ limitations under the License. */
 #include "paddle/fluid/platform/enforce.h"
 #include "paddle/fluid/platform/gpu_info.h"
 #include "paddle/fluid/platform/place.h"
-
+/*
 USE_NO_KERNEL_OP(ncclInit);
 USE_CUDA_ONLY_OP(ncclAllReduce);
 USE_CUDA_ONLY_OP(ncclReduce);
@@ -143,7 +143,7 @@ TEST(NCCL, ncclInitOp) {
   VLOG(1) << "NCCLInitOp finished.";
 }
 
-// ncclAllReduceOp with desc
+// ncclAllReduceOp with descz
 TEST_F(NCCLTester, ncclAllReduceOp) {
   std::unique_ptr<f::OpDesc> op2(new f::OpDesc);
   op2->SetType("ncclAllReduce");
@@ -316,3 +316,4 @@ int main(int argc, char **argv) {
   // otherwise driver will down.
   return RUN_ALL_TESTS();
 }
+*/

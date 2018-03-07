@@ -25,6 +25,8 @@ limitations under the License. */
 #include "paddle/fluid/framework/op_registry.h"
 #include "paddle/fluid/framework/reader.h"
 #include "paddle/fluid/platform/place.h"
+#include "paddle/fluid/platform/profiler.h"
+#include "paddle/fluid/framework/threadpool.h"
 
 DECLARE_bool(benchmark);
 DEFINE_bool(check_nan_inf, false,
@@ -33,6 +35,10 @@ DEFINE_bool(check_nan_inf, false,
 
 namespace paddle {
 namespace framework {
+namespace {
+std::mutex reduce_mu;
+std::vector<std::string> runned;
+}
 
 Executor::Executor(const platform::Place& place) : place_(place) {}
 
@@ -83,6 +89,12 @@ static void CheckTensorNANOrInf(const std::string& name,
                  "Tensor %s contains NAN", name);
 }
 
+void WaitOnPlace(const platform::Place& place) {
+  platform::DeviceContextPool &pool = platform::DeviceContextPool::Instance();
+  auto &dev_ctx = *pool.Get(place);
+  dev_ctx.Wait();
+}
+
 void Executor::Run(const ProgramDesc& pdesc, Scope* scope, int block_id,
                    bool create_local_scope, bool create_vars) {
   // TODO(tonyyang-svail):
@@ -99,6 +111,7 @@ void Executor::Run(const ProgramDesc& pdesc, Scope* scope, int block_id,
         if (var->Name() == framework::kEmptyVarName) {
           continue;
         }
+
 
         if (var->Persistable()) {
           auto* ptr = scope->Var(var->Name());
@@ -122,26 +135,156 @@ void Executor::Run(const ProgramDesc& pdesc, Scope* scope, int block_id,
     }  // if (create_local_scope)
   }    // if (create_vars)
 
+  platform::DeviceContextPool& pool = platform::DeviceContextPool::Instance();
+  auto dev_ctx = pool.Get(place_);
+  int dev_id_orig = boost::get<platform::CUDAPlace>(place_).GetDeviceId();
+  int dev_id = dev_id_orig * 1000 + block_id;
+  if (dev_id_orig == 0) {
+    std::lock_guard<std::mutex> l2(reduce_mu);
+    runned.clear();
+  }
+
+  std::mutex to_runs_mu;
+  std::deque<OpDesc*> to_runs;
+  std::unordered_map<int64_t, OpDesc*> running;
+  int64_t cur_id = 0;
   for (auto& op_desc : block.AllOps()) {
-    auto op = paddle::framework::OpRegistry::CreateOp(*op_desc);
-
-    VLOG(3) << place_ << " " << op->DebugStringEx(local_scope);
-    op->Run(*local_scope, place_);
-
-    if (FLAGS_benchmark) {
-      VLOG(2) << "Memory used after operator " + op->Type() + " running: "
-              << memory::memory_usage(place_);
+    op_desc->Reset(dev_id);
+    if (op_desc->IsReady(dev_id)) {
+      to_runs.push_back(op_desc);
     }
-    if (FLAGS_check_nan_inf) {
-      for (auto& vname : op->OutputVars(true)) {
-        auto* var = local_scope->FindVar(vname);
-        if (var == nullptr) continue;
-        if (var->IsType<framework::LoDTensor>()) {
-          CheckTensorNANOrInf(vname, var->Get<framework::LoDTensor>());
+  }
+
+  std::unordered_map<std::string, OpDesc*> reduces;
+  int cur_reduce = 0;
+
+  while (true) {
+    int64_t old_id = cur_id;
+    cur_id++;
+    OpDesc* op_desc = nullptr;
+    bool is_all_running = false;
+    bool is_too_many_running = false;
+    {
+      std::lock_guard<std::mutex> l(to_runs_mu);
+      if (to_runs.empty()) {
+        if (running.empty()) {
+          break;
+        } else {
+          is_all_running = true;
+        }
+      } else {
+        if (running.size() > 50) {
+          is_all_running = true;
+        } else {
+          op_desc = to_runs.front();
+          running[old_id] = op_desc;
+          to_runs.pop_front();
         }
       }
     }
+    if (is_all_running || is_too_many_running) {
+      std::this_thread::sleep_for(std::chrono::microseconds(4));
+      continue;
+    }
+
+    if (op_desc->UniqueName().find("ncclAllReduce") !=
+        op_desc->UniqueName().npos) {
+      if (dev_id_orig == 0) {
+        auto op = paddle::framework::OpRegistry::CreateOp(*op_desc);
+        // fprintf(stderr, "%s seq_start1 at %d at idx: %lu\n",
+        //         op_desc->UniqueName().c_str(), dev_id_orig, runned.size());
+        {
+          std::lock_guard<std::mutex> l2(reduce_mu);
+          runned.push_back(op_desc->UniqueName());
+        }
+        op->Run(*local_scope, place_);
+        // fprintf(stderr, "%s seq_done1\n",
+        //         op_desc->UniqueName().c_str());
+        std::vector<OpDesc*> nexts = op_desc->GetRunnables(dev_id);
+        {
+          std::lock_guard<std::mutex> l(to_runs_mu);
+          for (int i = 0; i < nexts.size(); ++i) {
+            to_runs.push_back(nexts[i]);
+          }
+          running.erase(old_id);
+        }
+      } else {
+        reduces[op_desc->UniqueName()] = op_desc;
+        bool can_run = false;
+        {
+          std::lock_guard<std::mutex> l2(reduce_mu);
+          can_run = cur_reduce < runned.size() &&
+              runned[cur_reduce] == op_desc->UniqueName() &&
+              reduces.find(runned[cur_reduce]) != reduces.end();
+        }
+        if (can_run) {
+          // fprintf(stderr, "to run at idx: %d\n", cur_reduce);
+          auto op = paddle::framework::OpRegistry::CreateOp(*op_desc);
+          // fprintf(stderr, "%s seq_start2 at %d\n",
+          //         op_desc->UniqueName().c_str(), dev_id_orig);
+          op->Run(*local_scope, place_);
+          // fprintf(stderr, "%s seq_done2\n", op_desc->UniqueName().c_str());
+          std::vector<OpDesc*> nexts = op_desc->GetRunnables(dev_id);
+          {
+            std::lock_guard<std::mutex> l(to_runs_mu);
+            for (int i = 0; i < nexts.size(); ++i) {
+              to_runs.push_back(nexts[i]);
+            }
+            running.erase(old_id);
+          }
+          std::lock_guard<std::mutex> l2(reduce_mu);
+          cur_reduce++;
+        } else {
+          std::lock_guard<std::mutex> l(to_runs_mu);
+          running.erase(old_id);
+          to_runs.push_back(op_desc);
+        }
+      }
+      continue;
+    }
+    std::thread(
+        [this, &to_runs, &to_runs_mu, op_desc, local_scope, dev_ctx, old_id,
+         &running, dev_id] {
+            OpDesc* desc = op_desc;
+            platform::RecordEvent record_event(
+                desc->UniqueName(), dev_ctx);
+            auto op = paddle::framework::OpRegistry::CreateOp(*desc);
+            // fprintf(stderr, "%s start3 at %d\n",
+            //         desc->UniqueName().c_str(), dev_id);
+            op->Run(*local_scope, place_);
+            // fprintf(stderr, "%s done3\n", desc->UniqueName().c_str());
+
+            std::vector<OpDesc*> nexts = desc->GetRunnables(dev_id);
+            std::lock_guard<std::mutex> l(to_runs_mu);
+            for (int i = 0; i < nexts.size(); ++i) {
+              to_runs.push_back(nexts[i]);
+            }
+            running.erase(old_id);
+        }).detach();
   }
+  /*
+  for (auto& op_desc : block.AllOps()) {
+    auto op = paddle::framework::OpRegistry::CreateOp(*op_desc);
+    VLOG(3) << place_ << " " << op->DebugStringEx(local_scope);
+    op->Run(*local_scope, place_);
+
+    std::thread t([&](){
+        auto op = paddle::framework::OpRegistry::CreateOp(*op_desc);
+        VLOG(3) << place_ << " " << op->DebugStringEx(local_scope);
+        op->Run(*local_scope, place_);
+    });
+    t.join();
+  }*/
+
+  int64_t no_scheduled = 0;
+  for (auto& op_desc : block.AllOps()) {
+    if (!op_desc->Scheduled(dev_id)) {
+      ++no_scheduled;
+      fprintf(stderr, "%s not scheduled at %d\n",
+              op_desc->UniqueName().c_str(), dev_id);
+    }
+  }
+
   if (create_vars && create_local_scope) {
     scope->DeleteScope(local_scope);
   }
@@ -246,6 +389,8 @@ void Executor::Run(const ProgramDesc& program, Scope* scope,
     auto* feed_holder = global_block->Var(feed_holder_name);
     feed_holder->SetType(proto::VarType::FEED_MINIBATCH);
     feed_holder->SetPersistable(true);
+
+    // for (auto block : program.Block())
 
     int i = 0;
     for (auto& feed_target : feed_targets) {

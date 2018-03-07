@@ -74,6 +74,7 @@ class OpInfoMap {
   }
 
   void Insert(const std::string& type, const OpInfo& info) {
+    std::lock_guard<std::mutex> l(mu_);
     PADDLE_ENFORCE(!Has(type), "Operator %s has been registered", type);
     map_.insert({type, info});
   }
@@ -100,6 +101,7 @@ class OpInfoMap {
 
  private:
   OpInfoMap() = default;
+  mutable std::mutex mu_;
   std::unordered_map<std::string, OpInfo> map_;
 
   DISABLE_COPY_AND_ASSIGN(OpInfoMap);
