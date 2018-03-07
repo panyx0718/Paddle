@@ -41,19 +41,6 @@ class BaseParallelForTest(unittest.TestCase):
                 gpu, parallel.for in gpu are different.
 
         """
-        cpu = fluid.CPUPlace()
-        result_cpu = self._run_test_impl_(
-            callback=callback,
-            feed=feed,
-            fetch=fetch,
-            place=cpu,
-            use_parallel=False)
-        result_cpu_parallel = self._run_test_impl_(
-            callback=callback,
-            feed=feed,
-            fetch=fetch,
-            place=cpu,
-            use_parallel=True)
         if fluid.core.is_compiled_with_cuda():
             gpu = fluid.CUDAPlace(0)
             result_gpu = self._run_test_impl_(
@@ -184,44 +171,11 @@ class ParallelOpTest(BaseParallelForTest):
         loss = fluid.layers.mean(hidden)
         yield loss
 
-    def test_simple_fc(self):
-        self.run_test(
-            callback=self.__network__,
-            feed={
-                'img': numpy.random.random(size=(51, 784)).astype('float32')
-            },
-            fetch=['fc1.w@GRAD'])
-
     def test_fc_with_tiny_data(self):
         self.run_test(
             callback=self.__network__,
             feed={'img': numpy.random.random(size=(1, 784)).astype('float32')},
             fetch=['fc1.w@GRAD'])
-
-
-class ParallelOpTestMultipleInput(BaseParallelForTest):
-    @staticmethod
-    def __network__():
-        x = fluid.layers.data(
-            shape=[784], dtype='float32', name='img1', stop_gradient=False)
-        y = fluid.layers.data(
-            shape=[784], dtype='float32', name='img2', stop_gradient=False)
-        yield [x, y]
-        x = x + y
-        hidden1 = fluid.layers.fc(input=x, size=200, param_attr='fc1.w')
-        hidden2 = fluid.layers.fc(input=hidden1, size=200, param_attr='fc2.w')
-        hidden3 = fluid.layers.fc(input=hidden2, size=200, param_attr='fc3.w')
-        loss = fluid.layers.mean(hidden3)
-        yield loss
-
-    def test_simple_fc(self):
-        self.run_test(
-            callback=self.__network__,
-            feed={
-                'img1': numpy.random.random(size=(51, 784)).astype('float32'),
-                'img2': numpy.random.random(size=(51, 784)).astype('float32')
-            },
-            fetch=['fc1.w@GRAD', 'fc2.w@GRAD', 'fc3.w@GRAD'])
 
 
 if __name__ == '__main__':

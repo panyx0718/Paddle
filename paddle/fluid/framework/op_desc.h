@@ -15,6 +15,7 @@ limitations under the License. */
 #pragma once
 
 #include <unordered_map>
+#include <thread>
 #include <vector>
 #include "paddle/fluid/framework/attribute.h"
 #include "paddle/fluid/framework/type_defs.h"
@@ -27,19 +28,77 @@ class BlockDesc;
 class ProgramDesc;
 class OpDesc {
  public:
-  OpDesc() {}
+  OpDesc();
 
   OpDesc(const std::string &type, const VariableNameMap &inputs,
          const VariableNameMap &outputs, const AttributeMap &attrs);
 
   OpDesc(const proto::OpDesc &desc, ProgramDesc *prog, BlockDesc *block);
 
-  explicit OpDesc(BlockDesc *block) : block_(block) {}
+  explicit OpDesc(BlockDesc *block);
 
   OpDesc(const OpDesc &other, BlockDesc *block) {
     *this = other;
     block_ = block;
   }
+
+  OpDesc(const OpDesc &other) {
+    dependent_ = other.dependent_;
+    cur_dependents_ = other.cur_dependents_;
+    ops_ = other.ops_;
+    rand_num_ = other.rand_num_;
+    name_ = other.name_;
+    desc_ = other.desc_;
+    block_ = other.block_;  // not_own
+    // input arg name => input variable names
+    inputs_ = other.inputs_;
+    // output arg name => output variable names
+    outputs_ = other.outputs_;
+    attrs_ = other.attrs_;
+
+    // need_update_ indicate there some local changes not be synchronized. If
+    // local changes should be synchronized, need_update_ should be set to true.
+    need_update_ = other.need_update_;
+  }
+
+  OpDesc(const OpDesc &&other) {
+    dependent_ = other.dependent_;
+    cur_dependents_ = other.cur_dependents_;
+    ops_ = other.ops_;
+    rand_num_ = other.rand_num_;
+    name_ = other.name_;
+    desc_ = other.desc_;
+    block_ = other.block_;  // not_own
+    // input arg name => input variable names
+    inputs_ = other.inputs_;
+    // output arg name => output variable names
+    outputs_ = other.outputs_;
+    attrs_ = other.attrs_;
+
+    // need_update_ indicate there some local changes not be synchronized. If
+    // local changes should be synchronized, need_update_ should be set to true.
+    need_update_ = other.need_update_;
+  }
+
+  OpDesc operator=(const OpDesc& other) {
+    return *this;
+  }
+
+  OpDesc operator=(OpDesc&& other) {
+    return *this;
+  }
+
+  std::vector<OpDesc*> GetRunnables(int dev_id);
+  std::vector<std::string> AllDepOps();
+  bool IsReady(int dev_id);
+  bool Scheduled(int dev_id);
+
+  void AddDependency(OpDesc* op);
+
+  void IncreaseADependent();
+  bool ReduceADependent(int dev_id);
+  int CurDependency(int dev_id);
+  void Reset(int dev_id);
 
   void CopyFrom(const OpDesc &op_desc);
 
@@ -129,6 +188,10 @@ class OpDesc {
 
   void SetBlock(BlockDesc *block) { this->block_ = block; }
 
+  std::string UniqueName();
+
+  void SetUniqueName(uint64_t block_id);
+
  private:
   template <typename MapType>
   static std::vector<typename MapType::key_type> MapKeys(const MapType &map) {
@@ -140,6 +203,10 @@ class OpDesc {
     return ret_val;
   }
 
+  mutable std::mutex mu_;
+
+  int rand_num_;
+  std::string name_;
   proto::OpDesc desc_;
   BlockDesc *block_;  // not_own
   // input arg name => input variable names
@@ -151,6 +218,10 @@ class OpDesc {
   // need_update_ indicate there some local changes not be synchronized. If
   // local changes should be synchronized, need_update_ should be set to true.
   bool need_update_{false};
+
+  int dependent_ = 0;
+  std::unordered_map<int, int> cur_dependents_;
+  std::unordered_map<std::string, OpDesc*> ops_;
 };
 }  // namespace framework
 }  // namespace paddle

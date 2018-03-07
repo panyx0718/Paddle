@@ -290,6 +290,10 @@ void BindOpDesc(py::module &m) {
       .def("attr_type", &OpDesc::GetAttrType)
       .def("attr_names", &OpDesc::AttrNames)
       .def("set_attr", &OpDesc::SetAttr)
+      .def("add_dependent", &OpDesc::AddDependency)
+      .def("unique_name", &OpDesc::UniqueName)
+      .def("set_unique_name", &OpDesc::SetUniqueName)
+      .def("all_dep_ops", &OpDesc::AllDepOps)
       .def("attr", &OpDesc::GetAttr)
       .def("set_block_attr", &OpDesc::SetBlockAttr)
       .def("set_serialized_attr",

@@ -79,16 +79,16 @@ class TestProfiler(unittest.TestCase):
                 pass_acc_calculator.add(value=acc, weight=b_size)
                 pass_acc = pass_acc_calculator.eval()
 
-    def test_cpu_profiler(self):
-        self.net_profiler('CPU')
+    # def test_cpu_profiler(self):
+    #    self.net_profiler('CPU')
 
     def test_cuda_profiler(self):
         self.net_profiler('GPU')
 
-    def test_all_profiler(self):
-        self.net_profiler('All', '/tmp/profile_out')
-        with open('/tmp/profile_out', 'r') as f:
-            self.assertGreater(len(f.read()), 0)
+    # def test_all_profiler(self):
+    #     self.net_profiler('All', '/tmp/profile_out')
+    #     with open('/tmp/profile_out', 'r') as f:
+    #         self.assertGreater(len(f.read()), 0)
 
 
 if __name__ == '__main__':

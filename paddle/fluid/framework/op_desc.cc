@@ -14,7 +14,6 @@ limitations under the License. */
 
 #include "paddle/fluid/framework/op_desc.h"
 #include <functional>
-#include <mutex>
 #include <unordered_map>
 #include "glog/logging.h"
 #include "paddle/fluid/framework/block_desc.h"
@@ -83,6 +82,14 @@ class CompileTimeInferShapeContext : public InferShapeContext {
   const BlockDesc &block_;
 };
 
+OpDesc::OpDesc(BlockDesc *block) : block_(block) {
+    rand_num_ = std::rand();
+}
+
+OpDesc::OpDesc() {
+  rand_num_ = std::rand();
+}
+
 OpDesc::OpDesc(const std::string &type, const VariableNameMap &inputs,
                const VariableNameMap &outputs, const AttributeMap &attrs) {
   desc_.set_type(type);
@@ -90,6 +97,17 @@ OpDesc::OpDesc(const std::string &type, const VariableNameMap &inputs,
   outputs_ = outputs;
   attrs_ = attrs;
   need_update_ = true;
+  rand_num_ = std::rand();
+}
+
+std::string OpDesc::UniqueName() {
+  return name_;
+}
+
+void OpDesc::SetUniqueName(uint64_t block_id) {
+  name_ = string::Sprintf("%s_b%lu_%d", Type().c_str(), block_id,
+                          rand_num_);
+  desc_.set_unique_name(name_);
 }
 
 void OpDesc::CopyFrom(const OpDesc &op_desc) {
@@ -98,6 +116,72 @@ void OpDesc::CopyFrom(const OpDesc &op_desc) {
   outputs_ = op_desc.outputs_;
   attrs_ = op_desc.attrs_;
   need_update_ = true;
+}
+
+std::vector<OpDesc*> OpDesc::GetRunnables(int dev_id) {
+  std::lock_guard<std::mutex> l(mu_);
+  std::vector<OpDesc*> runnables;
+  for (auto op_it : ops_) {
+    auto op = op_it.second;
+    if (op->ReduceADependent(dev_id)) {
+      runnables.push_back(op);
+      /*
+      fprintf(stderr, "    %s need %d more to scheduled on %d, ready\n",
+              op->UniqueName().c_str(),
+              op->CurDependency(dev_id), dev_id);*/
+      op->ReduceADependent(dev_id);
+    } else {
+      /*fprintf(stderr, "    %s need %d more to scheduled on %d\n",
+              op->UniqueName().c_str(),
+              op->CurDependency(dev_id), dev_id);*/
+    }
+  }
+  return runnables;
+}
+
+std::vector<std::string> OpDesc::AllDepOps() {
+  std::vector<std::string> deps;
+  for (auto op_it : ops_) {
+    deps.push_back(op_it.first);
+  }
+  return deps;
+}
+
+bool OpDesc::IsReady(int dev_id) {
+  std::lock_guard<std::mutex> l(mu_);
+  return cur_dependents_.at(dev_id) == 0;
+}
+
+bool OpDesc::Scheduled(int dev_id) {
+  std::lock_guard<std::mutex> l(mu_);
+  return cur_dependents_.at(dev_id) <= 0;
+}
+
+int OpDesc::CurDependency(int dev_id) {
+  return cur_dependents_.at(dev_id);
+}
+
+void OpDesc::AddDependency(OpDesc* op) {
+  std::lock_guard<std::mutex> l(mu_);
+  if (ops_.find(op->UniqueName()) != ops_.end()) {
+    return;
+  }
+  ops_[op->UniqueName()] = op;
+  op->IncreaseADependent();
+}
+
+void OpDesc::Reset(int dev_id) {
+  std::lock_guard<std::mutex> l(mu_);
+  cur_dependents_[dev_id] = dependent_;
+}
+
+void OpDesc::IncreaseADependent() {
+  dependent_ += 1;
+}
+
+bool OpDesc::ReduceADependent(int dev_id) {
+  cur_dependents_[dev_id] -= 1;
+  return cur_dependents_.at(dev_id) == 0;
 }
 
 OpDesc::OpDesc(const proto::OpDesc &desc, ProgramDesc *prog, BlockDesc *block)
@@ -134,6 +218,8 @@ OpDesc::OpDesc(const proto::OpDesc &desc, ProgramDesc *prog, BlockDesc *block)
     }
   }
   this->block_ = block;
+
+  rand_num_ = std::rand();
 }
 
 proto::OpDesc *OpDesc::Proto() {

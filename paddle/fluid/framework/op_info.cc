@@ -17,9 +17,11 @@ limitations under the License. */
 namespace paddle {
 namespace framework {
 
+static std::mutex mu;
 static OpInfoMap* g_op_info_map = nullptr;
 
 OpInfoMap& OpInfoMap::Instance() {
+  std::lock_guard<std::mutex> l(mu);
   if (g_op_info_map == nullptr) {
     g_op_info_map = new OpInfoMap();
   }

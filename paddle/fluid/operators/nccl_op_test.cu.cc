@@ -136,7 +136,7 @@ class NCCLTester : public ::testing::Test {
 // ncclInitOp with desc
 TEST_F(NCCLTester, ncclInitOp) {}
 
-// ncclAllReduceOp with desc
+// ncclAllReduceOp with descz
 TEST_F(NCCLTester, ncclAllReduceOp) {
   std::unique_ptr<f::OpDesc> op2(new f::OpDesc);
   op2->SetType("ncclAllReduce");
