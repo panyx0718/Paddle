@@ -478,6 +478,8 @@ class RuntimeInferShapeContext : public InferShapeContext {
 
 void OperatorWithKernel::RunImpl(const Scope& scope,
                                  const platform::Place& place) const {
+  RuntimeInferShapeContext infer_shape_ctx(*this, scope);
+  this->InferShape(&infer_shape_ctx);
   platform::DeviceContextPool& pool = platform::DeviceContextPool::Instance();
   auto* dev_ctx = pool.Get(place);
 
