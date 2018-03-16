@@ -222,7 +222,7 @@ def analyze_dependency(program):
             # if "nccl" in op.desc.unique_name():
             #     sys.stderr.write('nccl: %s\n' % op.desc.unique_name())
             #     should_print = True
-            if 'parallel_do_grad' in op.desc.unique_name():
+            if ncclInit and 'parallel_do_grad' in op.desc.unique_name():
                 ncclInit.desc.add_dependent(op.desc)
                 sys.stderr.write('%s add dependent %s\n' %
                                  (ncclInit.desc.unique_name(),

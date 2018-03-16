@@ -48,7 +48,7 @@ struct ExecutorPrepareContext {
   ExecutorPrepareContext(const framework::ProgramDesc& prog, size_t block_id)
       : prog_(prog), block_id_(block_id) {}
 
-  framework::ProgramDesc prog_;
+  const framework::ProgramDesc& prog_;
   size_t block_id_;
   std::vector<std::unique_ptr<OperatorBase>> ops_;
 };
@@ -293,6 +293,7 @@ ExecutorPrepareContext* Executor::Prepare(const ProgramDesc& program,
 void Executor::RunPreparedContext(ExecutorPrepareContext* ctx, Scope* scope,
                                   bool create_local_scope, bool create_vars) {
   auto& block = ctx->prog_.Block(ctx->block_id_);
+  int block_id = block.ID();
 
   Scope* local_scope = scope;
   if (create_vars) {

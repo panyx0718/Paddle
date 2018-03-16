@@ -65,10 +65,6 @@ class BaseParallelForTest(unittest.TestCase):
                 use_parallel=True,
                 use_nccl=True,
                 use_gpu=True)
-            self._assert_same_(fetch, result_cpu, result_cpu_parallel,
-                               result_gpu, result_gpu_parallel, result_gpu_nccl)
-        else:
-            self._assert_same_(fetch, result_cpu, result_cpu_parallel)
 
     def _run_test_impl_(self,
                         callback,

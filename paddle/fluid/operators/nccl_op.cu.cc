@@ -66,7 +66,6 @@ class NCCLAllReduceKernel : public framework::OpKernel<T> {
     // device id
     int gpu_id = boost::get<platform::CUDAPlace>(ctx.GetPlace()).GetDeviceId();
     int idx = comm->GetCommId(gpu_id);
-<<<<<<< HEAD
     VLOG(3) << "gpu : "
             << " invoke allreduce. send " << x->numel() << " recv "
             << out->numel();
@@ -77,24 +76,6 @@ class NCCLAllReduceKernel : public framework::OpKernel<T> {
     VLOG(3) << "gpu : "
             << " finished allreduce. send " << x->numel() << " recv "
             << out->numel();
-=======
-    {
-      for (size_t i = 0; i < ins.size(); ++i) {
-        VLOG(1) << "gpu : "
-                << " invoke allreduce. send " << ins[i]->numel() << " recv "
-                << outs[i]->numel();
-        PADDLE_ENFORCE(platform::dynload::ncclAllReduce(
-            ins[i]->data<T>(), outs[i]->mutable_data<T>(ctx.GetPlace()),
-            outs[i]->numel(), NCCLTypeWrapper<T>::type, reduction_op_,
-            comm->comms().at(idx), stream));
-        PADDLE_ENFORCE(cudaStreamSynchronize(stream));
-
-        VLOG(1) << "gpu : "
-                << " finished allreduce. send " << ins[i]->numel() << " recv "
-                << outs[i]->numel();
-      }
-    }
->>>>>>> Multi-threaded executor
   }
 };
 

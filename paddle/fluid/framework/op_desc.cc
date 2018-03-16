@@ -125,8 +125,7 @@ std::vector<OpDesc*> OpDesc::GetRunnables(int dev_id) {
     auto op = op_it.second;
     if (op->ReduceADependent(dev_id)) {
       runnables.push_back(op);
-      /*
-      fprintf(stderr, "    %s need %d more to scheduled on %d, ready\n",
+      /*fprintf(stderr, "    %s need %d more to scheduled on %d, ready\n",
               op->UniqueName().c_str(),
               op->CurDependency(dev_id), dev_id);*/
       op->ReduceADependent(dev_id);
