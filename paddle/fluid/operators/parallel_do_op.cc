@@ -18,11 +18,11 @@ limitations under the License. */
 #include "paddle/fluid/framework/op_registry.h"
 #include "paddle/fluid/framework/threadpool.h"
 #include "paddle/fluid/operators/detail/safe_ref.h"
+#include "paddle/fluid/platform/device_tracer.h"
 #include "paddle/fluid/platform/profiler.h"
 
 namespace paddle {
 namespace operators {
-
 static constexpr char kInputs[] = "inputs";
 static constexpr char kParameters[] = "parameters";
 static constexpr char kPlaces[] = "places";
@@ -35,6 +35,15 @@ static constexpr char kUseNCCL[] = "use_nccl";
 
 using LoDTensor = framework::LoDTensor;
 using SelectedRows = framework::SelectedRows;
+
+struct CopyEntry {
+  const framework::Tensor &src;
+  framework::Tensor *dst;
+  const std::string &param;
+};
+
+// std::mutex copied_params_mu;
+// static std::unordered_map<int, std::set<std::string>> copied_params;
 
 static void SplitTensorAndMoveTensorToScopes(
     const framework::Scope &scope, std::vector<framework::Scope *> *sub_scopes,
@@ -136,25 +145,60 @@ class ParallelDoOp : public framework::OperatorBase {
                             ->GetMutable<std::vector<framework::Scope *>>();
 
     // split input
-    SplitTensorAndMoveTensorToScopes(scope, &sub_scopes, places,
-                                     Inputs(kInputs));
-
-    // copy parameter
-    for (auto &param : Inputs(kParameters)) {
-      PADDLE_ENFORCE(scope.FindVar(param)->IsType<LoDTensor>(),
-                     "Only support parameter type as LoDTensor");
-      auto &src = scope.FindVar(param)->Get<LoDTensor>();
-      for (size_t i = 0; i < sub_scopes.size(); ++i) {
-        auto &place = places[i];
-        auto *sub_scope = sub_scopes[i];
-        auto *dst = sub_scope->Var(param)->GetMutable<LoDTensor>();
-        framework::TensorCopy(src, place, dst);
+    {
+      platform::DeviceTracer *tracer = platform::GetDeviceTracer();
+      uint64_t start_ts = platform::PosixInNsec();
+      SplitTensorAndMoveTensorToScopes(scope, &sub_scopes, places,
+                                       Inputs(kInputs));
+      if (tracer && tracer->IsEnabled()) {
+        tracer->AddCPURecords("ParallelDoSplit", start_ts,
+                              platform::PosixInNsec(), 1000, 0);
       }
     }
-    WaitOnPlaces(places);
+
+    // copy parameter
+    std::vector<std::future<void>> memcpy_workers;
+    memcpy_workers.reserve(places.size());
+    for (size_t place_idx = 0; place_idx < sub_scopes.size(); ++place_idx) {
+      auto &place = places[place_idx];
+      auto *cur_scope = sub_scopes[place_idx];
+      memcpy_workers.emplace_back(
+          framework::Async([this, &place, cur_scope, &scope, place_idx]() {
+            platform::DeviceTracer *tracer = platform::GetDeviceTracer();
+            uint64_t start_ts = platform::PosixInNsec();
+
+            platform::DeviceContextPool &pool =
+                platform::DeviceContextPool::Instance();
+            const platform::DeviceContext *dev_ctx = pool.Get(place);
+            int dev_id = boost::get<platform::CUDAPlace>(place).GetDeviceId();
+            auto stream =
+                reinterpret_cast<const platform::CUDADeviceContext &>(*dev_ctx)
+                    .memcpy_stream();
+
+            for (auto &param : Inputs(kParameters)) {
+              auto &src = scope.FindVar(param)->Get<LoDTensor>();
+              auto *dst = cur_scope->Var(param)->GetMutable<LoDTensor>();
+              framework::TensorCopy(src, place, dst);
+
+              cudaEvent_t event;
+              PADDLE_ENFORCE(cudaEventCreate(&event));
+              PADDLE_ENFORCE(cudaEventRecord(event, stream));
+              framework::AddEventToWait(dev_id, event, param);
+            }
+            if (tracer && tracer->IsEnabled()) {
+              tracer->AddCPURecords("ParallelTensorCopy2", start_ts,
+                                    platform::PosixInNsec(), 1000,
+                                    static_cast<int>(place_idx) + 1);
+            }
+          }));
+    }
+    for (auto &worker : memcpy_workers) {
+      worker.wait();
+    }
 
     std::vector<std::future<void>> workers;
     workers.reserve(places.size());
+
     for (size_t place_idx = 0; place_idx < sub_scopes.size(); ++place_idx) {
       auto &place = places[place_idx];
       auto *cur_scope = sub_scopes[place_idx];
@@ -171,6 +215,7 @@ class ParallelDoOp : public framework::OperatorBase {
     for (auto &worker : workers) {
       worker.wait();
     }
+    framework::ClearEvent();
     WaitOnPlaces(places);
 
     // merge output

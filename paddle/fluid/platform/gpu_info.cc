@@ -25,6 +25,20 @@ DEFINE_double(fraction_of_gpu_memory_to_use, 0.92,
 namespace paddle {
 namespace platform {
 
+bool p2p_enabled = false;
+
+void EnableP2P(int d1, int d2) {
+  int access2from1, access1from2;
+  PADDLE_ENFORCE(cudaDeviceCanAccessPeer(&access2from1, d1, d2), "test1");
+  PADDLE_ENFORCE(cudaDeviceCanAccessPeer(&access1from2, d2, d1), "test2");
+  PADDLE_ENFORCE(access2from1 == 1, "cannot access 2from1");
+  PADDLE_ENFORCE(access1from2 == 1, "cannot access 1from2");
+  cudaSetDevice(d1);
+  cudaDeviceEnablePeerAccess(d2, 0);
+  cudaSetDevice(d2);
+  cudaDeviceEnablePeerAccess(d1, 0);
+}
+
 int GetCUDADeviceCount() {
   int count;
   PADDLE_ENFORCE(
@@ -128,6 +142,10 @@ void GpuMemcpyAsync(void *dst, const void *src, size_t count,
 
 void GpuMemcpyPeer(void *dst, int dst_device, const void *src, int src_device,
                    size_t count, cudaStream_t stream) {
+  /*if (!p2p_enabled) {
+    EnableP2P(src_device, dst_device);
+    p2p_enabled = true;
+  }*/
   PADDLE_ENFORCE(
       cudaMemcpyPeerAsync(dst, dst_device, src, src_device, count, stream),
       "cudaMemcpyPeerAsync failed in paddle::platform::GpuMemcpyPeer");

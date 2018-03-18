@@ -14,6 +14,7 @@ limitations under the License. */
 
 #pragma once
 
+#include <set>
 #include <unordered_map>
 #include <vector>
 #include "paddle/fluid/framework/attribute.h"
@@ -55,6 +56,10 @@ class OpDesc {
 
   void SetInput(const std::string &param_name,
                 const std::vector<std::string> &args);
+
+  void AddWaitArg(const std::string &arg);
+
+  const std::set<std::string> &WaitArgs() { return wait_args_; }
 
   const std::vector<std::string> &Output(const std::string &name) const;
 
@@ -151,6 +156,8 @@ class OpDesc {
   // need_update_ indicate there some local changes not be synchronized. If
   // local changes should be synchronized, need_update_ should be set to true.
   bool need_update_{false};
+
+  std::set<std::string> wait_args_;
 };
 }  // namespace framework
 }  // namespace paddle

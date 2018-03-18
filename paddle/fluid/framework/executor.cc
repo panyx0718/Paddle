@@ -40,6 +40,34 @@ namespace {
 int kProgramId = -1;
 }  // namespace
 
+std::mutex wait_params_mu;
+std::unordered_map<int, std::unordered_map<std::string, cudaEvent_t>>
+    wait_params;
+void AddEventToWait(int dev_id, cudaEvent_t event, const std::string& param) {
+  std::lock_guard<std::mutex> l(wait_params_mu);
+  wait_params[dev_id][param] = event;
+}
+
+void WaitForEvent(int dev_id, const std::string& arg) {
+  cudaEvent_t event;
+  {
+    std::lock_guard<std::mutex> l(wait_params_mu);
+    const auto& events = wait_params.at(dev_id);
+    if (events.find(arg) == events.end()) {
+      fprintf(stderr, "%s not found in wait params\n", arg.c_str());
+      return;
+    }
+    event = events.at(arg);
+  }
+  PADDLE_ENFORCE(cudaEventSynchronize(event), "cannot sync");
+  PADDLE_ENFORCE(cudaEventDestroy(event), "cannot destroy");
+}
+
+void ClearEvent() {
+  std::lock_guard<std::mutex> l(wait_params_mu);
+  wait_params.clear();
+}
+
 struct ExecutorPrepareContext {
   ExecutorPrepareContext(const framework::ProgramDesc& prog, size_t block_id)
       : prog_(prog), block_id_(block_id) {}
@@ -101,9 +129,80 @@ static void CheckTensorNANOrInf(const std::string& name,
 void Executor::Run(const ProgramDesc& pdesc, Scope* scope, int block_id,
                    bool create_local_scope, bool create_vars) {
   platform::RecordBlock b(block_id);
-  auto* ctx = Prepare(pdesc, block_id);
-  RunPreparedContext(ctx, scope, create_local_scope, create_vars);
-  delete ctx;
+
+  auto& block = pdesc.Block(block_id);
+
+  Scope* local_scope = scope;
+  if (create_vars) {
+    if (create_local_scope) {
+      local_scope = &scope->NewScope();
+      for (auto& var : block.AllVars()) {
+        if (var->Name() == framework::kEmptyVarName) {
+          continue;
+        }
+
+        if (var->Persistable()) {
+          auto* ptr = scope->Var(var->Name());
+          CreateTensor(ptr, var->GetType());
+          VLOG(3) << "Create Variable " << var->Name()
+                  << " global, which pointer is " << ptr;
+        } else {
+          auto* ptr = local_scope->Var(var->Name());
+          CreateTensor(ptr, var->GetType());
+          VLOG(3) << "Create Variable " << var->Name()
+                  << " locally, which pointer is " << ptr;
+        }
+      }
+    } else {
+      for (auto& var : block.AllVars()) {
+        auto* ptr = local_scope->Var(var->Name());
+        CreateTensor(ptr, var->GetType());
+        VLOG(3) << "Create variable " << var->Name() << ", which pointer is "
+                << ptr;
+      }
+    }  // if (create_local_scope)
+  }    // if (create_vars)
+
+  std::set<std::string> ready_args;
+
+  platform::DeviceContextPool& pool = platform::DeviceContextPool::Instance();
+  auto* dev_ctx = pool.Get(place_);
+  int dev_id = boost::get<platform::CUDAPlace>(place_).GetDeviceId();
+
+  for (auto* op_desc : block.AllOps()) {
+    platform::RecordEvent record_event(op_desc->Type(), dev_ctx);
+    // fprintf(stderr, "runing op %s\n", op->Type().c_str());
+    for (const std::string& arg : op_desc->WaitArgs()) {
+      if (ready_args.find(arg) != ready_args.end()) continue;
+      WaitForEvent(dev_id, arg);
+      ready_args.insert(arg);
+    }
+    auto op = OpRegistry::CreateOp(*op_desc);
+    op->Run(*local_scope, place_);
+
+    if (FLAGS_benchmark) {
+      VLOG(2) << "Memory used after operator " + op->Type() + " running: "
+              << memory::memory_usage(place_);
+    }
+    if (FLAGS_check_nan_inf) {
+      for (auto& vname : op->OutputVars(true)) {
+        auto* var = local_scope->FindVar(vname);
+        if (var == nullptr) continue;
+        if (var->IsType<framework::LoDTensor>()) {
+          CheckTensorNANOrInf(vname, var->Get<framework::LoDTensor>());
+        }
+      }
+    }
+  }
+  if (create_vars && create_local_scope) {
+    scope->DeleteScope(local_scope);
+  }
+  if (FLAGS_benchmark) {
+    VLOG(2) << "-------------------------------------------------------";
+    VLOG(2) << "Memory used after deleting local scope: "
+            << memory::memory_usage(place_);
+    VLOG(2) << "-------------------------------------------------------";
+  }
 }
 
 // Check whether the block already has feed operators and feed_holder.
@@ -278,69 +377,7 @@ ExecutorPrepareContext* Executor::Prepare(const ProgramDesc& program,
 }
 
 void Executor::RunPreparedContext(ExecutorPrepareContext* ctx, Scope* scope,
-                                  bool create_local_scope, bool create_vars) {
-  auto& block = ctx->prog_.Block(ctx->block_id_);
-
-  Scope* local_scope = scope;
-  if (create_vars) {
-    if (create_local_scope) {
-      local_scope = &scope->NewScope();
-      for (auto& var : block.AllVars()) {
-        if (var->Name() == framework::kEmptyVarName) {
-          continue;
-        }
-
-        if (var->Persistable()) {
-          auto* ptr = scope->Var(var->Name());
-          CreateTensor(ptr, var->GetType());
-          VLOG(3) << "Create Variable " << var->Name()
-                  << " global, which pointer is " << ptr;
-        } else {
-          auto* ptr = local_scope->Var(var->Name());
-          CreateTensor(ptr, var->GetType());
-          VLOG(3) << "Create Variable " << var->Name()
-                  << " locally, which pointer is " << ptr;
-        }
-      }
-    } else {
-      for (auto& var : block.AllVars()) {
-        auto* ptr = local_scope->Var(var->Name());
-        CreateTensor(ptr, var->GetType());
-        VLOG(3) << "Create variable " << var->Name() << ", which pointer is "
-                << ptr;
-      }
-    }  // if (create_local_scope)
-  }    // if (create_vars)
-
-  for (auto& op : ctx->ops_) {
-    VLOG(4) << place_ << " " << op->DebugStringEx(local_scope);
-    op->Run(*local_scope, place_);
-    VLOG(3) << place_ << " " << op->DebugStringEx(local_scope);
-
-    if (FLAGS_benchmark) {
-      VLOG(2) << "Memory used after operator " + op->Type() + " running: "
-              << memory::memory_usage(place_);
-    }
-    if (FLAGS_check_nan_inf) {
-      for (auto& vname : op->OutputVars(true)) {
-        auto* var = local_scope->FindVar(vname);
-        if (var == nullptr) continue;
-        if (var->IsType<framework::LoDTensor>()) {
-          CheckTensorNANOrInf(vname, var->Get<framework::LoDTensor>());
-        }
-      }
-    }
-  }
-  if (create_vars && create_local_scope) {
-    scope->DeleteScope(local_scope);
-  }
-  if (FLAGS_benchmark) {
-    VLOG(2) << "-------------------------------------------------------";
-    VLOG(2) << "Memory used after deleting local scope: "
-            << memory::memory_usage(place_);
-    VLOG(2) << "-------------------------------------------------------";
-  }
-}
+                                  bool create_local_scope, bool create_vars) {}
 
 }  // namespace framework
 }  // namespace paddle

@@ -23,6 +23,11 @@ limitations under the License. */
 namespace paddle {
 namespace framework {
 struct ExecutorPrepareContext;
+
+void AddEventToWait(int dev_id, cudaEvent_t event, const std::string& param);
+
+void ClearEvent();
+
 class Executor {
  public:
   // TODO(dzhwinter) : Do not rely on this function, it will be removed

@@ -13,6 +13,7 @@
    limitations under the License. */
 
 #include "paddle/fluid/framework/tensor_util.h"
+#include "paddle/fluid/platform/device_tracer.h"
 
 namespace paddle {
 namespace framework {
@@ -32,24 +33,37 @@ void TensorCopy(const Tensor& src, const platform::Place& dst_place,
 
   auto size = src.numel() * SizeOfType(src.type());
 
+  platform::DeviceTracer* tracer = platform::GetDeviceTracer();
+
   if (platform::is_cpu_place(src_place) && platform::is_cpu_place(dst_place)) {
+    uint64_t start_ts = platform::PosixInNsec();
     memory::Copy(boost::get<platform::CPUPlace>(dst_place), dst_ptr,
                  boost::get<platform::CPUPlace>(src_place), src_ptr, size);
+    if (tracer && tracer->IsEnabled()) {
+      tracer->AddCPURecords("CPU2CPU", start_ts, platform::PosixInNsec(), 1001,
+                            0);
+    }
   }
 #ifdef PADDLE_WITH_CUDA
   else if (platform::is_gpu_place(src_place) &&  // NOLINT
            platform::is_cpu_place(dst_place)) {
+    uint64_t start_ts = platform::PosixInNsec();
     auto src_gpu_place = boost::get<platform::CUDAPlace>(src_place);
     auto dst_cpu_place = boost::get<platform::CPUPlace>(dst_place);
     auto ctx_place = ctx.GetPlace();
     PADDLE_ENFORCE(platform::is_gpu_place(ctx_place));
     auto ctx_gpu_place = boost::get<platform::CUDAPlace>(ctx_place);
     PADDLE_ENFORCE_EQ(src_gpu_place, ctx_gpu_place);
-    memory::Copy(
-        dst_cpu_place, dst_ptr, src_gpu_place, src_ptr, size,
-        reinterpret_cast<const platform::CUDADeviceContext&>(ctx).stream());
+    memory::Copy(dst_cpu_place, dst_ptr, src_gpu_place, src_ptr, size,
+                 reinterpret_cast<const platform::CUDADeviceContext&>(ctx)
+                     .memcpy_stream());
+    if (tracer && tracer->IsEnabled()) {
+      tracer->AddCPURecords("GPU2CPU", start_ts, platform::PosixInNsec(), 1001,
+                            0);
+    }
   } else if (platform::is_cpu_place(src_place) &&
              platform::is_gpu_place(dst_place)) {
+    uint64_t start_ts = platform::PosixInNsec();
     auto src_cpu_place = boost::get<platform::CPUPlace>(src_place);
     auto dst_gpu_place = boost::get<platform::CUDAPlace>(dst_place);
     auto ctx_place = ctx.GetPlace();
@@ -59,17 +73,26 @@ void TensorCopy(const Tensor& src, const platform::Place& dst_place,
     memory::Copy(
         dst_gpu_place, dst_ptr, src_cpu_place, src_ptr, size,
         reinterpret_cast<const platform::CUDADeviceContext&>(ctx).stream());
+    if (tracer && tracer->IsEnabled()) {
+      tracer->AddCPURecords("CPU2GPU", start_ts, platform::PosixInNsec(), 1001,
+                            0);
+    }
   } else if (platform::is_gpu_place(src_place) &&
              platform::is_gpu_place(dst_place)) {
+    uint64_t start_ts = platform::PosixInNsec();
     auto src_gpu_place = boost::get<platform::CUDAPlace>(src_place);
     auto dst_gpu_place = boost::get<platform::CUDAPlace>(dst_place);
     auto ctx_place = ctx.GetPlace();
     PADDLE_ENFORCE(platform::is_gpu_place(ctx_place));
     auto ctx_gpu_place = boost::get<platform::CUDAPlace>(ctx_place);
     PADDLE_ENFORCE_EQ(src_gpu_place, ctx_gpu_place);
-    memory::Copy(
-        dst_gpu_place, dst_ptr, src_gpu_place, src_ptr, size,
-        reinterpret_cast<const platform::CUDADeviceContext&>(ctx).stream());
+    memory::Copy(dst_gpu_place, dst_ptr, src_gpu_place, src_ptr, size,
+                 reinterpret_cast<const platform::CUDADeviceContext&>(ctx)
+                     .memcpy_stream());
+    if (tracer && tracer->IsEnabled()) {
+      tracer->AddCPURecords("GPU2GPU", start_ts, platform::PosixInNsec(), 1001,
+                            0);
+    }
   }
 #endif
 }

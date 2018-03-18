@@ -97,6 +97,8 @@ class CUDADeviceContext : public DeviceContext {
   /*! \brief  Return cuda stream in the device context. */
   cudaStream_t stream() const;
 
+  cudaStream_t memcpy_stream() const;
+
  private:
   CUDAPlace place_;
 
@@ -110,6 +112,8 @@ class CUDADeviceContext : public DeviceContext {
   int compute_capability;
   int multi_process;
   int max_threads_per_mp;
+
+  cudaStream_t memcpy_stream_;
 };
 
 template <>

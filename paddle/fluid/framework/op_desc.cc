@@ -162,6 +162,8 @@ void OpDesc::SetInput(const std::string &param_name,
   inputs_[param_name] = args;
 }
 
+void OpDesc::AddWaitArg(const std::string &arg) { wait_args_.insert(arg); }
+
 const std::vector<std::string> &OpDesc::Output(const std::string &name) const {
   auto it = outputs_.find(name);
   PADDLE_ENFORCE(it != outputs_.end(), "Output %s cannot be found in Op %s",

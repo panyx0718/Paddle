@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import sys
+
 import numpy as np
 import contextlib
 from framework import Program, default_main_program, Variable
@@ -179,6 +181,40 @@ def get_program_cache_key(feed, fetch_list):
     return str(feed_var_names + fetch_var_names)
 
 
+def analyze_parallel_do_params(program):
+    parallel_do = None
+    for block in program.blocks:
+        for op in block.ops:
+            if op.desc.type() == "parallel_do":
+                parallel_do = op
+                break
+        if parallel_do:
+            break
+    if not parallel_do:
+        return
+
+    # pd_block = parallel_do.attrs['sub_block']
+    # sys.stderr.write('parallel_do_block %d' % pd_block.idx)
+    pd_block = program.block(1)
+
+    pd_params = set()
+    for input_arg in parallel_do.input('parameters'):
+        pd_params.add(input_arg)
+
+    ordered_params = []
+    visited_params = set()
+    for op in pd_block.desc.all_ops():
+        for input_name in op.input_names():
+            for input_arg in op.input(input_name):
+                if input_arg in pd_params and input_arg not in visited_params:
+                    visited_params.add(input_arg)
+                    ordered_params.append(input_arg)
+                    op.add_wait_arg(input_arg)
+
+    parallel_do.desc.set_input('parameters', ordered_params)
+    # sys.stderr.write('setting inputs: %s\n' % ', '.join(ordered_params))
+
+
 class Executor(object):
     def __init__(self, places):
         if not isinstance(places, list) and not isinstance(places, tuple):
@@ -194,6 +230,7 @@ class Executor(object):
         self.executor = core.Executor(act_places[0])
         self.places = places
         self.program_caches = dict()
+        self._analyzed = set()
 
     def aslodtensor(self, data):
         def accumulate(data):
@@ -345,6 +382,16 @@ class Executor(object):
                 core.set_feed_variable(scope, cur_feed, feed_var_name, idx)
             else:
                 break
+        """
+        program_str = '%s' % program_cache
+        with open('/tmp/program_%d' % id(program_cache), 'w') as f:
+            f.write('%s' % program_cache)
+        sys.stderr.write('%s' % program_str)
+        """
+
+        if not id(program_cache) in self._analyzed:
+            self._analyzed.add(id(program_cache))
+            analyze_parallel_do_params(program_cache)
 
         self.executor.run(program_cache.desc, scope, 0, True, True)
         outs = [

@@ -201,6 +201,7 @@ void BindBlockDesc(py::module &m) {
            },
            py::return_value_policy::reference)
       .def("all_vars", &BlockDesc::AllVars, py::return_value_policy::reference)
+      .def("all_ops", &BlockDesc::AllOps, py::return_value_policy::reference)
       .def("op_size", &BlockDesc::OpSize)
       .def("op", &BlockDesc::Op, py::return_value_policy::reference)
       .def("serialize_to_string", SerializeMessage<BlockDesc>);
@@ -281,6 +282,7 @@ void BindOpDesc(py::module &m) {
       .def("output", &OpDesc::Output)
       .def("output_names", &OpDesc::OutputNames)
       .def("set_input", &OpDesc::SetInput)
+      .def("add_wait_arg", &OpDesc::AddWaitArg)
       .def("set_output", &OpDesc::SetOutput)
       .def("input_arg_names", &OpDesc::InputArgumentNames)
       .def("output_arg_names", &OpDesc::OutputArgumentNames)
