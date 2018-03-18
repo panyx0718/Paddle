@@ -450,6 +450,8 @@ class Executor(object):
             self._analyzed.add(program_cache)
             sys.stderr.write('analyzed a program\n')
 
+        with open('/tmp/program', "w") as f:
+            f.write('%s' % program_cache)
         self.executor.run(program_cache.desc, scope, 0, True, True)
         outs = [
             core.get_fetch_variable(scope, fetch_var_name, i)

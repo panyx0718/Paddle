@@ -293,7 +293,6 @@ ExecutorPrepareContext* Executor::Prepare(const ProgramDesc& program,
 void Executor::RunPreparedContext(ExecutorPrepareContext* ctx, Scope* scope,
                                   bool create_local_scope, bool create_vars) {
   auto& block = ctx->prog_.Block(ctx->block_id_);
-  int block_id = block.ID();
 
   Scope* local_scope = scope;
   if (create_vars) {
@@ -326,15 +325,12 @@ void Executor::RunPreparedContext(ExecutorPrepareContext* ctx, Scope* scope,
     }  // if (create_local_scope)
   }    // if (create_vars)
 
-  platform::DeviceContextPool& pool = platform::DeviceContextPool::Instance();
-  auto dev_ctx = pool.Get(place_);
+
+  int block_id = block.ID();
   int dev_id_orig = boost::get<platform::CUDAPlace>(place_).GetDeviceId();
   int dev_id = dev_id_orig * 1000 + block_id;
-  if (dev_id_orig == 0) {
-    std::lock_guard<std::mutex> l2(reduce_mu);
-    runned.clear();
-  }
-
+  platform::DeviceContextPool& pool = platform::DeviceContextPool::Instance();
+  auto dev_ctx = pool.Get(place_);
   std::mutex to_runs_mu;
   std::deque<OpDesc*> to_runs;
   std::unordered_map<int64_t, OpDesc*> running;
@@ -374,7 +370,7 @@ void Executor::RunPreparedContext(ExecutorPrepareContext* ctx, Scope* scope,
       }
     }
     if (is_all_running || is_too_many_running) {
-      std::this_thread::sleep_for(std::chrono::microseconds(4));
+      std::this_thread::sleep_for(std::chrono::microseconds(1));
       continue;
     }
 
@@ -436,36 +432,42 @@ void Executor::RunPreparedContext(ExecutorPrepareContext* ctx, Scope* scope,
     std::thread(
         [this, &to_runs, &to_runs_mu, op_desc, local_scope, dev_ctx, old_id,
             &running, dev_id] {
-            OpDesc* desc = op_desc;
-            platform::RecordEvent record_event(
-                desc->UniqueName(), dev_ctx);
-            auto op = paddle::framework::OpRegistry::CreateOp(*desc);
-            // fprintf(stderr, "%s start3 at %d\n",
-            //         desc->UniqueName().c_str(), dev_id);
-            op->Run(*local_scope, place_);
-            // fprintf(stderr, "%s done3\n", desc->UniqueName().c_str());
+            std::deque<OpDesc*> local_to_runs;
+            local_to_runs.push_back(op_desc);
+            while (true) {
+              OpDesc* desc = local_to_runs.front();
+              local_to_runs.pop_front();
+              {
+                platform::RecordEvent record_event(
+                    desc->UniqueName(), dev_ctx);
+                auto op = paddle::framework::OpRegistry::CreateOp(*desc);
+                // fprintf(stderr, "%s start3 at %d\n",
+                //         desc->UniqueName().c_str(), dev_id);
+                op->Run(*local_scope, place_);
+                // fprintf(stderr, "%s done3\n", desc->UniqueName().c_str());
+              }
 
-            std::vector<OpDesc*> nexts = desc->GetRunnables(dev_id);
-            std::lock_guard<std::mutex> l(to_runs_mu);
-            for (int i = 0; i < nexts.size(); ++i) {
-              to_runs.push_back(nexts[i]);
+              std::lock_guard<std::mutex> l(to_runs_mu);
+              for (OpDesc* n : desc->GetRunnables(dev_id)) {
+                if (n->UniqueName().find("nccl") != n->UniqueName().npos ||
+                    n->UniqueName().find("conv") != n->UniqueName().npos) {
+                  to_runs.push_back(n);
+                } else {
+                  local_to_runs.push_back(n);
+                }
+              }
+              if (local_to_runs.empty()) {
+                running.erase(old_id);
+                break;
+              }
             }
-            running.erase(old_id);
         }).detach();
   }
-  /*
-  for (auto& op_desc : block.AllOps()) {
-    auto op = paddle::framework::OpRegistry::CreateOp(*op_desc);
-    VLOG(3) << place_ << " " << op->DebugStringEx(local_scope);
-    op->Run(*local_scope, place_);
 
-    std::thread t([&](){
-        auto op = paddle::framework::OpRegistry::CreateOp(*op_desc);
-        VLOG(3) << place_ << " " << op->DebugStringEx(local_scope);
-        op->Run(*local_scope, place_);
-    });
-    t.join();
-  }*/
+  if (dev_id_orig == 0) {
+    std::lock_guard<std::mutex> l2(reduce_mu);
+    runned.clear();
+  }
 
   int64_t no_scheduled = 0;
   for (auto& op_desc : block.AllOps()) {
@@ -475,6 +477,13 @@ void Executor::RunPreparedContext(ExecutorPrepareContext* ctx, Scope* scope,
               op_desc->UniqueName().c_str(), dev_id);
     }
   }
+
+  /*
+  for (auto& op_desc : block.AllOps()) {
+    auto op = paddle::framework::OpRegistry::CreateOp(*op_desc);
+    VLOG(3) << place_ << " " << op->DebugStringEx(local_scope);
+    op->Run(*local_scope, place_);
+  }*/
 
   if (create_vars && create_local_scope) {
     scope->DeleteScope(local_scope);
