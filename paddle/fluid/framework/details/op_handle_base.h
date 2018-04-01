@@ -32,6 +32,7 @@ class OpHandleBase {
   std::unordered_map<platform::Place, platform::DeviceContext *,
                      platform::PlaceHash>
       dev_ctxes_;
+  int dev_id_;
 
 #ifdef PADDLE_WITH_CUDA
   std::unordered_map<int, cudaEvent_t> events_;

@@ -63,16 +63,6 @@ inline uint64_t PosixInNsec() {
 Event::Event(EventKind kind, std::string name, uint32_t thread_id,
              const DeviceContext* dev_ctx)
     : kind_(kind), name_(name), thread_id_(thread_id), has_cuda_(false) {
-#ifdef PADDLE_WITH_CUDA
-  has_cuda_ = dev_ctx ? platform::is_gpu_place(dev_ctx->GetPlace()) : false;
-  if (has_cuda_) {
-    auto* cuda_dev_ctx = static_cast<const CUDADeviceContext*>(dev_ctx);
-    PADDLE_ENFORCE(cudaGetDevice(&device_));
-    PADDLE_ENFORCE(cudaEventCreate(&event_));
-    auto stream = cuda_dev_ctx->stream();
-    PADDLE_ENFORCE(cudaEventRecord(event_, stream));
-  }
-#endif
   cpu_ns_ = GetTimeInNsec();
 }
 
@@ -93,17 +83,7 @@ double Event::CpuElapsedMs(const Event& e) const {
 }
 
 double Event::CudaElapsedMs(const Event& e) const {
-#ifdef PADDLE_WITH_CUDA
-  PADDLE_ENFORCE(e.has_cuda() && has_cuda());
-  PADDLE_ENFORCE(e.device() == device());
-  PADDLE_ENFORCE(cudaEventSynchronize(event_));
-  PADDLE_ENFORCE(cudaEventSynchronize(e.event()));
-  float ms;
-  PADDLE_ENFORCE(cudaEventElapsedTime(&ms, event_, e.event()));
-  return ms;
-#else
-  PADDLE_THROW("CUDA is not enabled");
-#endif
+  return -1;
 }
 
 #ifdef PADDLE_WITH_CUDA

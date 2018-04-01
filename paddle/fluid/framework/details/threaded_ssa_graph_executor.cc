@@ -25,11 +25,15 @@ ThreadedSSAGraphExecutor::ThreadedSSAGraphExecutor(
     const std::vector<platform::Place> &places,
     std::unique_ptr<SSAGraph> &&graph)
     : SSAGraphExecutor(std::move(graph)),
-      pool_(num_threads >= 2 ? new ::ThreadPool(num_threads) : nullptr),
       local_scopes_(local_scopes),
       places_(places),
       fetch_ctxs_(places),
-      use_event_(use_event) {}
+      use_event_(use_event) {
+  pools_.reserve(places_.size());
+  for (size_t i = 0; i < places_.size(); ++i) {
+    pools_.emplace_back(new ::ThreadPool(4));
+  }
+}
 
 FeedFetchList ThreadedSSAGraphExecutor::Run(
     const std::vector<std::string> &fetch_tensors) {
@@ -194,8 +198,8 @@ void ThreadedSSAGraphExecutor::RunOp(
       LOG(FATAL) << "Unknown exception catched";
     }
   };
-  if (pool_) {
-    pool_->enqueue(op_run);
+  if (!pools_.empty()) {
+    pools_[op->dev_id_]->enqueue(op_run);
   } else {
     op_run();
   }
