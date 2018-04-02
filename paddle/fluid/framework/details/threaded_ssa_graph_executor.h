@@ -91,7 +91,7 @@ class ThreadedSSAGraphExecutor : public SSAGraphExecutor {
   void RunDelayedOps(const std::unordered_set<OpHandleBase *> &delayed_ops);
 
  private:
-  std::unique_ptr<::ThreadPool> pool_;
+  std::vector<std::unique_ptr<::ThreadPool>> pools_;
   std::vector<Scope *> local_scopes_;
   std::vector<platform::Place> places_;
   platform::DeviceContextPool fetch_ctxs_;

@@ -25,13 +25,17 @@ ThreadedSSAGraphExecutor::ThreadedSSAGraphExecutor(
     const std::vector<platform::Place> &places,
     std::unique_ptr<SSAGraph> &&graph, bool allow_op_delay)
     : SSAGraphExecutor(std::move(graph)),
-      pool_(num_threads >= 2 ? new ::ThreadPool(num_threads) : nullptr),
       local_scopes_(local_scopes),
       places_(places),
       fetch_ctxs_(places),
       use_event_(use_event),
-      running_ops_(0),
-      allow_op_delay_(allow_op_delay) {}
+      allow_op_delay_(allow_op_delay),
+      running_ops_(0) {
+  for (size_t i = 0; i < places_.size(); ++i) {
+    pools_.emplace_back(new ::ThreadPool(1));
+  }
+}
+>>>>>>> working with 1 thread per-gpu
 
 void ThreadedSSAGraphExecutor::RunDelayedOps(
     const std::unordered_set<OpHandleBase *> &delayed_ops) {
@@ -229,8 +233,8 @@ void ThreadedSSAGraphExecutor::RunOp(
       LOG(FATAL) << "Unknown exception catched";
     }
   };
-  if (pool_) {
-    pool_->enqueue(op_run);
+  if (!pools_.empty()) {
+    pools_[op->dev_id_]->enqueue(op_run);
   } else {
     op_run();
   }
