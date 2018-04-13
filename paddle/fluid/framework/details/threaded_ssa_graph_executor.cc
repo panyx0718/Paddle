@@ -25,7 +25,7 @@ ThreadedSSAGraphExecutor::ThreadedSSAGraphExecutor(
     const std::vector<platform::Place> &places,
     std::unique_ptr<SSAGraph> &&graph, bool allow_op_delay)
     : SSAGraphExecutor(std::move(graph)),
-      pool_(num_threads >= 2 ? new ::ThreadPool(num_threads) : nullptr),
+      pool_(num_threads >= 2 ? new ::ThreadPool(1) : nullptr),
       local_scopes_(local_scopes),
       places_(places),
       fetch_ctxs_(places),
@@ -196,8 +196,9 @@ void ThreadedSSAGraphExecutor::RunOp(
     BlockingQueue<VarHandleBase *> *ready_var_q, details::OpHandleBase *op) {
   auto op_run = [ready_var_q, op, this] {
     try {
-      VLOG(10) << op->Name() << " : " << op->DebugString();
+      VLOG(1) << op->Name() << " : " << op->DebugString();
       op->Run(use_event_);
+      VLOG(1) << op->Name() << " Done";
       running_ops_--;
       ready_var_q->Extend(op->outputs_);
     } catch (platform::EnforceNotMet ex) {

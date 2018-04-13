@@ -354,7 +354,7 @@ void OpDesc::CheckAttrs() {
 }
 
 void OpDesc::InferShape(const BlockDesc &block) const {
-  VLOG(3) << "CompileTime infer shape on " << Type();
+  // VLOG(3) << "CompileTime infer shape on " << Type();
   InitInferShapeFuncs();
   auto &infer_shape = OpInfoMap::Instance().Get(this->Type()).infer_shape_;
   PADDLE_ENFORCE(static_cast<bool>(infer_shape),

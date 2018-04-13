@@ -32,7 +32,7 @@ namespace framework {
 Scope::~Scope() {
   DropKids();
   for (auto& kv : vars_) {
-    VLOG(3) << "Destroy variable " << kv.first;
+    // VLOG() << "Destroy variable " << kv.first;
     delete kv.second;
   }
 }
@@ -48,7 +48,7 @@ Variable* Scope::Var(const std::string& name) {
   if (v != nullptr) return v;
   v = new Variable();
   vars_[name] = v;
-  VLOG(3) << "Create variable " << name;
+  // VLOG(2) << "Create variable " << name;
   v->name_ = &(vars_.find(name)->first);
   return v;
 }
