@@ -13,170 +13,196 @@
 # limitations under the License.
 
 import unittest
-import os
+import sys
+import time
 import numpy as np
-import math
-
 import paddle.fluid as fluid
-import paddle
-import paddle.dataset.mnist as mnist
-from paddle.fluid.layers.learning_rate_scheduler import _decay_step_counter
-from paddle.fluid.initializer import init_on_cpu
 
 
-def cosine_decay(lr, step_each_epoch, epochs):
-    global_step = _decay_step_counter()
-    with init_on_cpu():
-        epoch = fluid.layers.floor(global_step / step_each_epoch)
-        decayed_lr = lr * (fluid.layers.cos(epoch * (math.pi / epochs)) + 1) / 2
-    return decayed_lr
+def conv_bn_layer(input, num_filters, filter_size, stride=1, groups=1,
+                  act=None):
+    conv = fluid.layers.conv2d(
+        input=input,
+        num_filters=num_filters,
+        filter_size=filter_size,
+        stride=stride,
+        padding=(filter_size - 1) / 2,
+        groups=groups,
+        act=None,
+        bias_attr=False)
+    return fluid.layers.batch_norm(input=conv, act=act)
 
 
-def lenet(data, label):
-    conv1 = fluid.layers.conv2d(data, 32, 5, 1, act=None)
-    bn1 = fluid.layers.batch_norm(conv1, act='relu')
-    pool1 = fluid.layers.pool2d(bn1, 2, 'max', 2)
-    conv2 = fluid.layers.conv2d(pool1, 50, 5, 1, act=None)
-    bn2 = fluid.layers.batch_norm(conv2, act='relu')
-    pool2 = fluid.layers.pool2d(bn2, 2, 'max', 2)
+def squeeze_excitation(input, num_channels, reduction_ratio):
+    pool = fluid.layers.pool2d(
+        input=input, pool_size=0, pool_type='avg', global_pooling=True)
+    squeeze = fluid.layers.fc(input=pool,
+                              size=num_channels / reduction_ratio,
+                              act='relu')
+    excitation = fluid.layers.fc(input=squeeze,
+                                 size=num_channels,
+                                 act='sigmoid')
+    scale = fluid.layers.elementwise_mul(x=input, y=excitation, axis=0)
+    return scale
 
-    fc1 = fluid.layers.fc(pool2, size=500, act='relu')
-    fc2 = fluid.layers.fc(fc1, size=10, act='softmax')
 
-    loss = fluid.layers.cross_entropy(input=fc2, label=label)
-    avg_loss = fluid.layers.mean(loss)
-    return avg_loss
+def shortcut(input, ch_out, stride):
+    ch_in = input.shape[1]
+    if ch_in != ch_out:
+        if stride == 1:
+            filter_size = 1
+        else:
+            filter_size = 3
+        return conv_bn_layer(input, ch_out, filter_size, stride)
+    else:
+        return input
+
+
+def bottleneck_block(input, num_filters, stride, cardinality, reduction_ratio):
+    conv0 = conv_bn_layer(
+        input=input, num_filters=num_filters, filter_size=1, act='relu')
+    conv1 = conv_bn_layer(
+        input=conv0,
+        num_filters=num_filters,
+        filter_size=3,
+        stride=stride,
+        groups=cardinality,
+        act='relu')
+    conv2 = conv_bn_layer(
+        input=conv1, num_filters=num_filters * 2, filter_size=1, act=None)
+    scale = squeeze_excitation(
+        input=conv2,
+        num_channels=num_filters * 2,
+        reduction_ratio=reduction_ratio)
+
+    short = shortcut(input, num_filters * 2, stride)
+
+    return fluid.layers.elementwise_add(x=short, y=scale, act='relu')
+
+
+def SE_ResNeXt(input, class_dim, infer=False):
+    cardinality = 64
+    reduction_ratio = 16
+    depth = [3, 8, 36, 3]
+    num_filters = [128, 256, 512, 1024]
+
+    conv = conv_bn_layer(
+        input=input, num_filters=64, filter_size=3, stride=2, act='relu')
+    conv = conv_bn_layer(
+        input=conv, num_filters=64, filter_size=3, stride=1, act='relu')
+    conv = conv_bn_layer(
+        input=conv, num_filters=128, filter_size=3, stride=1, act='relu')
+    conv = fluid.layers.pool2d(
+        input=conv, pool_size=3, pool_stride=2, pool_padding=1, pool_type='max')
+
+    for block in range(len(depth)):
+        for i in range(depth[block]):
+            conv = bottleneck_block(
+                input=conv,
+                num_filters=num_filters[block],
+                stride=2 if i == 0 and block != 0 else 1,
+                cardinality=cardinality,
+                reduction_ratio=reduction_ratio)
+
+    pool = fluid.layers.pool2d(
+        input=conv, pool_size=0, pool_type='avg', global_pooling=True)
+    if not infer:
+        drop = fluid.layers.dropout(x=pool, dropout_prob=0.2)
+    else:
+        drop = pool
+    out = fluid.layers.fc(input=drop, size=class_dim, act='softmax')
+    return out
 
 
 class CompareParallelExecutorAndParallelDo(unittest.TestCase):
-    def parallel_do(self, train_inputs, test_inputs, seed):
+    def parallel_exe(self, seed, iter_times):
         main = fluid.Program()
         startup = fluid.Program()
         startup.random_seed = seed
+        class_dim = 1000
+
         with fluid.program_guard(main, startup):
-            data = fluid.layers.data(
-                name='image', shape=[1, 28, 28], dtype='float32')
-            label = fluid.layers.data(name='label', shape=[1], dtype='int64')
-            devices_num = fluid.core.get_cuda_device_count()
-            places = fluid.layers.get_places(devices_num)
+            image = fluid.layers.fill_constant(
+                shape=[12, 3, 224, 224], dtype='float32', value=0.0)
+            label = fluid.layers.fill_constant(
+                shape=[12, 1], dtype='int64', value=0.0)
+
+            out = SE_ResNeXt(input=image, class_dim=class_dim)
+            cost = fluid.layers.cross_entropy(input=out, label=label)
+            avg_cost = fluid.layers.mean(x=cost)
+
+            optimizer = fluid.optimizer.SGD(learning_rate=0.002)
+            optimizer.minimize(avg_cost)
+
+            fluid.memory_optimize(fluid.default_main_program())
+
+            place = fluid.CUDAPlace(0)
+            exe = fluid.Executor(place)
+            exe.run(startup)
+
+            train_exe = fluid.ParallelExecutor(
+                loss_name=avg_cost.name, use_cuda=True)
+            losses = []
+            for _ in xrange(iter_times):
+                loss = np.mean(
+                    np.array(train_exe.run(fetch_list=[avg_cost.name])[0]))
+                losses.append(loss)
+        return losses
+
+    def parallel_do(self, seed, iter_times):
+        main = fluid.Program()
+        startup = fluid.Program()
+        startup.random_seed = seed
+        class_dim = 1000
+
+        with fluid.program_guard(main, startup):
+            image = fluid.layers.fill_constant(
+                shape=[12, 3, 224, 224], dtype='float32', value=0.0)
+            label = fluid.layers.fill_constant(
+                shape=[12, 1], dtype='int64', value=0.0)
+            places = fluid.layers.get_places()
             pd = fluid.layers.ParallelDo(places, use_nccl=True)
+
             with pd.do():
-                im = pd.read_input(data)
-                lb = pd.read_input(label)
-                loss = lenet(im, lb)
-                pd.write_output(loss)
-            loss = pd()
-            avg_loss = fluid.layers.mean(loss)
-            test_program = main.clone(for_test=True)
-            opt = fluid.optimizer.Momentum(
-                learning_rate=cosine_decay(0.01, 1, len(train_inputs)),
-                momentum=0.9,
-                regularization=fluid.regularizer.L2Decay(1e-4))
-            opt.minimize(avg_loss, startup)
-            fluid.memory_optimize(main)
+                image_ = pd.read_input(image)
+                label_ = pd.read_input(label)
+                out = SE_ResNeXt(input=image_, class_dim=class_dim)
+                cost = fluid.layers.cross_entropy(input=out, label=label_)
+                avg_cost = fluid.layers.mean(x=cost)
+                accuracy = fluid.layers.accuracy(input=out, label=label_)
+                pd.write_output(avg_cost)
+                pd.write_output(accuracy)
+
+            avg_cost, accuracy = pd()
+            avg_cost = fluid.layers.mean(x=avg_cost)
+
+            optimizer = fluid.optimizer.SGD(learning_rate=0.002)
+            optimizer.minimize(avg_cost)
 
             place = fluid.CUDAPlace(0)
             exe = fluid.Executor(place)
             exe.run(startup)
 
-            grad_var = fluid.framework.get_var('conv2d_0.w_0@GRAD')
-            fetch_list = [avg_loss, grad_var]
-
-            feeder = fluid.DataFeeder(place=place, feed_list=[data, label])
-
-            losses = []
-            grads = []
-            test_losses = []
-            for data in train_inputs:
-                loss_v, grad = exe.run(main,
-                                       feed=feeder.feed(data),
-                                       fetch_list=fetch_list)
-                losses.append(loss_v)
-                grads.append(grad)
-                for test_data in test_inputs:
-                    test_loss = exe.run(test_program,
-                                        feed=feeder.feed(test_data),
-                                        fetch_list=[avg_loss])
-                    test_losses.append(test_loss)
-            return losses, grads, test_losses
-
-    def parallel_exe(self, train_inputs, test_inputs, seed):
-        main = fluid.Program()
-        startup = fluid.Program()
-        startup.random_seed = seed
-        with fluid.program_guard(main, startup):
-            data = fluid.layers.data(
-                name='image', shape=[1, 28, 28], dtype='float32')
-            label = fluid.layers.data(name='label', shape=[1], dtype='int64')
-            loss = lenet(data, label)
-            test_program = main.clone(for_test=True)
-            opt = fluid.optimizer.Momentum(
-                learning_rate=cosine_decay(0.01, 1, len(train_inputs)),
-                momentum=0.9,
-                regularization=fluid.regularizer.L2Decay(1e-4))
-            opt.minimize(loss)
             fluid.memory_optimize(main)
 
-            place = fluid.CUDAPlace(0)
-            exe = fluid.Executor(place)
-            exe.run(startup)
-
-            grad_var = fluid.framework.get_var('conv2d_2.w_0@GRAD')
-            fetch_list = [loss.name, grad_var.name]
-
-            feeder = fluid.DataFeeder(place=place, feed_list=[data, label])
-            pexe = fluid.ParallelExecutor(
-                use_cuda=True, loss_name=loss.name, main_program=main)
-
             losses = []
-            grads = []
-            test_losses = []
-            for data in train_inputs:
-                loss_v, grad = pexe.run(fetch_list, feed=feeder.feed(data))
-                loss_v = np.array(loss_v)
-                losses.append(np.mean(loss_v))
-                grads.append(np.array(grad)[0:32, :, :, :])
-                for test_data in test_inputs:
-                    test_loss = exe.run(test_program,
-                                        feed=feeder.feed(test_data),
-                                        fetch_list=[loss.name])
-                    test_losses.append(test_loss)
-            return losses, grads, test_losses
+            for _ in xrange(iter_times):
+                losses.append(exe.run(main, fetch_list=[avg_cost.name])[0][0])
+        return losses
 
     def test_compare_grad(self):
-        trn_reader = paddle.batch(mnist.train(), batch_size=32)
-        trn_reader_iter = trn_reader()
-        tst_reader = paddle.batch(mnist.test(), batch_size=32)
-        tst_reader_iter = tst_reader()
-
         seed = 1
-        iters = 5
-        train_inputs = []
-        for i in range(iters):
-            train_inputs.append(trn_reader_iter.next())
-        test_inputs = [tst_reader_iter.next()]
+        iter = 10
+        do_losses = self.parallel_do(seed, iter)
+        exe_losses = self.parallel_exe(seed, iter)
 
-        do_losses, do_grads, do_test_losses = self.parallel_do(
-            train_inputs, test_inputs, seed)
-        exe_losses, exe_grads, exe_test_losses = self.parallel_exe(
-            train_inputs, test_inputs, seed)
-
-        for i in range(len(do_losses)):
+        for i in range(iter):
+            sys.stderr.write('loss: %s %s\n' % (do_losses[i], exe_losses[i]))
             self.assertTrue(
                 np.allclose(
                     do_losses[i], exe_losses[i], atol=1e-8),
                 "ParallelDo loss: " + str(do_losses[i]) + "\n ParallelExe loss:"
                 + str(exe_losses[i]))
-            self.assertTrue(
-                np.allclose(
-                    do_grads[i], exe_grads[i], atol=1e-6),
-                "ParallelDo grads: " + str(do_grads[i]) +
-                "\n ParallelExe grads:" + str(exe_grads[i]))
-            self.assertTrue(
-                np.allclose(
-                    do_test_losses[i], exe_test_losses[i], atol=1e-8),
-                "ParallelDo test loss: " + str(do_test_losses[i]) +
-                "\n ParallelExe test loss:" + str(exe_test_losses[i]))
 
 
 if __name__ == '__main__':
