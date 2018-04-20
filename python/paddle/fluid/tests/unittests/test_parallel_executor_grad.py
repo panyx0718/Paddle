@@ -16,7 +16,9 @@ import unittest
 import sys
 import time
 import numpy as np
+import paddle
 import paddle.fluid as fluid
+import paddle.dataset.flowers as flowers
 
 
 def conv_bn_layer(input, num_filters, filter_size, stride=1, groups=1,
@@ -115,17 +117,23 @@ def SE_ResNeXt(input, class_dim, infer=False):
 
 
 class CompareParallelExecutorAndParallelDo(unittest.TestCase):
-    def parallel_exe(self, seed, iter_times):
+    def parallel_exe(self, seed, iter_times, train_inputs, test_inputs):
         main = fluid.Program()
         startup = fluid.Program()
         startup.random_seed = seed
         class_dim = 1000
 
         with fluid.program_guard(main, startup):
-            image = fluid.layers.fill_constant(
-                shape=[12, 3, 224, 224], dtype='float32', value=0.0)
-            label = fluid.layers.fill_constant(
-                shape=[12, 1], dtype='int64', value=0.0)
+            image = fluid.layers.data(
+                shape=[-1, 3, 224, 224],
+                dtype='float32',
+                name='image',
+                append_batch_size=False)
+            label = fluid.layers.data(
+                shape=[-1, 1],
+                dtype='int64',
+                name='label',
+                append_batch_size=False)
 
             out = SE_ResNeXt(input=image, class_dim=class_dim)
             cost = fluid.layers.cross_entropy(input=out, label=label)
@@ -142,24 +150,48 @@ class CompareParallelExecutorAndParallelDo(unittest.TestCase):
 
             train_exe = fluid.ParallelExecutor(
                 loss_name=avg_cost.name, use_cuda=True)
+            feeder = fluid.DataFeeder(place=place, feed_list=[image, label])
             losses = []
-            for _ in xrange(iter_times):
+            for data in train_inputs:
+                """
+                image_data = []
+                label_data = []
+                for d in data:
+                    image_data.append(d[0])
+                    label_data.append(d[1])
+                image_data = np.array(image_data)
+                label_data = np.array(label_data)
+
+                sys.stderr.write('data: %s %s\n' %
+                                 (str(image_data.shape),
+                                  str(label_data.shape)))
+
+                feed_dict = {"image": image_data, "label": image_data}
+                """
                 loss = np.mean(
-                    np.array(train_exe.run(fetch_list=[avg_cost.name])[0]))
+                    np.array(
+                        train_exe.run(fetch_list=[avg_cost.name],
+                                      feed=feeder.feed(data))[0]))
                 losses.append(loss)
         return losses
 
-    def parallel_do(self, seed, iter_times):
+    def parallel_do(self, seed, iter_times, train_inputs, test_inputs):
         main = fluid.Program()
         startup = fluid.Program()
         startup.random_seed = seed
         class_dim = 1000
 
         with fluid.program_guard(main, startup):
-            image = fluid.layers.fill_constant(
-                shape=[12, 3, 224, 224], dtype='float32', value=0.0)
-            label = fluid.layers.fill_constant(
-                shape=[12, 1], dtype='int64', value=0.0)
+            image = fluid.layers.data(
+                shape=[-1, 3, 224, 224],
+                dtype='float32',
+                name='image',
+                append_batch_size=False)
+            label = fluid.layers.data(
+                shape=[-1, 1],
+                dtype='int64',
+                name='label',
+                append_batch_size=False)
             places = fluid.layers.get_places()
             pd = fluid.layers.ParallelDo(places, use_nccl=True)
 
@@ -185,19 +217,36 @@ class CompareParallelExecutorAndParallelDo(unittest.TestCase):
 
             fluid.memory_optimize(main)
 
+            feeder = fluid.DataFeeder(place=place, feed_list=[image, label])
             losses = []
-            for _ in xrange(iter_times):
-                losses.append(exe.run(main, fetch_list=[avg_cost.name])[0][0])
+            for data in train_inputs:
+                # sys.stderr.write('data: %s\n' % data)
+                losses.append(
+                    exe.run(main,
+                            fetch_list=[avg_cost.name],
+                            feed=feeder.feed(data))[0][0])
         return losses
 
     def test_compare_grad(self):
         seed = 1
         iter = 10
-        do_losses = self.parallel_do(seed, iter)
-        exe_losses = self.parallel_exe(seed, iter)
 
+        trn_reader = paddle.batch(flowers.train(), batch_size=32)
+        trn_reader_iter = trn_reader()
+        tst_reader = paddle.batch(flowers.test(), batch_size=32)
+        tst_reader_iter = tst_reader()
+
+        train_inputs = []
+        test_inputs = []
+        for _ in range(iter):
+            train_inputs.append(trn_reader_iter.next())
+        test_inputs.append(tst_reader_iter.next())
+
+        do_losses = self.parallel_do(seed, iter, train_inputs, test_inputs)
+        exe_losses = self.parallel_exe(seed, iter, train_inputs, test_inputs)
+
+        sys.stderr.write('loss: %s %s\n' % (do_losses, exe_losses))
         for i in range(iter):
-            sys.stderr.write('loss: %s %s\n' % (do_losses[i], exe_losses[i]))
             self.assertTrue(
                 np.allclose(
                     do_losses[i], exe_losses[i], atol=1e-8),
