@@ -136,8 +136,8 @@ def lenet(data, label):
 
 class CompareParallelExecutorAndParallelDo(unittest.TestCase):
     def model(self, image, label):
-        # return SE_ResNeXt(image, label)
-        return lenet(image, label)
+        return SE_ResNeXt(image, label)
+        # return lenet(image, label)
 
     def parallel_exe(self, seed, train_inputs):
         main = fluid.Program()
@@ -218,7 +218,6 @@ class CompareParallelExecutorAndParallelDo(unittest.TestCase):
             feeder = fluid.DataFeeder(place=place, feed_list=[image, label])
             losses = []
             for data in train_inputs:
-                # sys.stderr.write('data: %s\n' % data)
                 losses.append(
                     exe.run(main,
                             fetch_list=[avg_cost.name],
@@ -227,7 +226,7 @@ class CompareParallelExecutorAndParallelDo(unittest.TestCase):
 
     def test_compare_grad(self):
         seed = 1
-        iter = 10
+        iter = 4
 
         trn_reader = paddle.batch(flowers.train(), batch_size=2)
         trn_reader_iter = trn_reader()
