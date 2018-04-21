@@ -82,7 +82,7 @@ def bottleneck_block(input, num_filters, stride, cardinality, reduction_ratio):
     return fluid.layers.elementwise_add(x=short, y=scale, act='relu')
 
 
-def SE_ResNeXt(input, class_dim, infer=False):
+def SE_ResNeXt(input, label, infer=False):
     cardinality = 64
     reduction_ratio = 16
     depth = [3, 8, 36, 3]
@@ -112,16 +112,37 @@ def SE_ResNeXt(input, class_dim, infer=False):
         drop = fluid.layers.dropout(x=pool, dropout_prob=0.2)
     else:
         drop = pool
-    out = fluid.layers.fc(input=drop, size=class_dim, act='softmax')
-    return out
+    out = fluid.layers.fc(input=drop, size=1000, act='softmax')
+    cost = fluid.layers.cross_entropy(input=out, label=label)
+    avg_cost = fluid.layers.mean(x=cost)
+    return avg_cost
+
+
+def lenet(data, label):
+    conv1 = fluid.layers.conv2d(data, 32, 5, 1, act=None)
+    bn1 = fluid.layers.batch_norm(conv1, act='relu')
+    pool1 = fluid.layers.pool2d(bn1, 2, 'max', 2)
+    conv2 = fluid.layers.conv2d(pool1, 50, 5, 1, act=None)
+    bn2 = fluid.layers.batch_norm(conv2, act='relu')
+    pool2 = fluid.layers.pool2d(bn2, 2, 'max', 2)
+
+    fc1 = fluid.layers.fc(pool2, size=500, act='relu')
+    fc2 = fluid.layers.fc(fc1, size=10, act='softmax')
+
+    loss = fluid.layers.cross_entropy(input=fc2, label=label)
+    avg_loss = fluid.layers.mean(loss)
+    return avg_loss
 
 
 class CompareParallelExecutorAndParallelDo(unittest.TestCase):
-    def parallel_exe(self, seed, iter_times, train_inputs, test_inputs):
+    def model(self, image, label):
+        # return SE_ResNeXt(image, label)
+        return lenet(image, label)
+
+    def parallel_exe(self, seed, train_inputs):
         main = fluid.Program()
         startup = fluid.Program()
         startup.random_seed = seed
-        class_dim = 1000
 
         with fluid.program_guard(main, startup):
             image = fluid.layers.data(
@@ -135,10 +156,7 @@ class CompareParallelExecutorAndParallelDo(unittest.TestCase):
                 name='label',
                 append_batch_size=False)
 
-            out = SE_ResNeXt(input=image, class_dim=class_dim)
-            cost = fluid.layers.cross_entropy(input=out, label=label)
-            avg_cost = fluid.layers.mean(x=cost)
-
+            avg_cost = self.model(image, label)
             optimizer = fluid.optimizer.SGD(learning_rate=0.002)
             optimizer.minimize(avg_cost)
 
@@ -153,21 +171,6 @@ class CompareParallelExecutorAndParallelDo(unittest.TestCase):
             feeder = fluid.DataFeeder(place=place, feed_list=[image, label])
             losses = []
             for data in train_inputs:
-                """
-                image_data = []
-                label_data = []
-                for d in data:
-                    image_data.append(d[0])
-                    label_data.append(d[1])
-                image_data = np.array(image_data)
-                label_data = np.array(label_data)
-
-                sys.stderr.write('data: %s %s\n' %
-                                 (str(image_data.shape),
-                                  str(label_data.shape)))
-
-                feed_dict = {"image": image_data, "label": image_data}
-                """
                 loss = np.mean(
                     np.array(
                         train_exe.run(fetch_list=[avg_cost.name],
@@ -175,11 +178,10 @@ class CompareParallelExecutorAndParallelDo(unittest.TestCase):
                 losses.append(loss)
         return losses
 
-    def parallel_do(self, seed, iter_times, train_inputs, test_inputs):
+    def parallel_do(self, seed, train_inputs):
         main = fluid.Program()
         startup = fluid.Program()
         startup.random_seed = seed
-        class_dim = 1000
 
         with fluid.program_guard(main, startup):
             image = fluid.layers.data(
@@ -198,14 +200,10 @@ class CompareParallelExecutorAndParallelDo(unittest.TestCase):
             with pd.do():
                 image_ = pd.read_input(image)
                 label_ = pd.read_input(label)
-                out = SE_ResNeXt(input=image_, class_dim=class_dim)
-                cost = fluid.layers.cross_entropy(input=out, label=label_)
-                avg_cost = fluid.layers.mean(x=cost)
-                accuracy = fluid.layers.accuracy(input=out, label=label_)
+                avg_cost = self.model(image_, label_)
                 pd.write_output(avg_cost)
-                pd.write_output(accuracy)
 
-            avg_cost, accuracy = pd()
+            avg_cost = pd()
             avg_cost = fluid.layers.mean(x=avg_cost)
 
             optimizer = fluid.optimizer.SGD(learning_rate=0.002)
@@ -231,19 +229,21 @@ class CompareParallelExecutorAndParallelDo(unittest.TestCase):
         seed = 1
         iter = 10
 
-        trn_reader = paddle.batch(flowers.train(), batch_size=32)
+        trn_reader = paddle.batch(flowers.train(), batch_size=2)
         trn_reader_iter = trn_reader()
-        tst_reader = paddle.batch(flowers.test(), batch_size=32)
-        tst_reader_iter = tst_reader()
 
         train_inputs = []
-        test_inputs = []
         for _ in range(iter):
-            train_inputs.append(trn_reader_iter.next())
-        test_inputs.append(tst_reader_iter.next())
+            # train_inputs.append(trn_reader_iter.next())
+            # train_inputs.append(
+            #    [(np.reshape(np.zeros(shape=[3, 224, 224]), [-1]), 0),
+            #     (np.reshape(np.zeros(shape=[3, 224, 224]), [-1]), 0)])
+            train_inputs.append(
+                [(np.reshape(np.random.rand(3, 224, 224), [-1]), 0),
+                 (np.reshape(np.random.rand(3, 224, 224), [-1]), 0)])
 
-        do_losses = self.parallel_do(seed, iter, train_inputs, test_inputs)
-        exe_losses = self.parallel_exe(seed, iter, train_inputs, test_inputs)
+        do_losses = self.parallel_do(seed, train_inputs)
+        exe_losses = self.parallel_exe(seed, train_inputs)
 
         sys.stderr.write('loss: %s %s\n' % (do_losses, exe_losses))
         for i in range(iter):
