@@ -511,6 +511,7 @@ void ElemwiseGradCompute(const framework::ExecutionContext& ctx,
                          framework::Tensor* dx, framework::Tensor* dy,
                          DX_OP dx_op, DY_OP dy_op) {
   if (x.dims() == y.dims()) {
+    fprintf(stderr, "same dimension\n");
     size_t N = static_cast<size_t>(framework::product(x.dims()));
     platform::ForRange<DeviceContext> for_range(
         ctx.template device_context<DeviceContext>(), N);
@@ -521,6 +522,7 @@ void ElemwiseGradCompute(const framework::ExecutionContext& ctx,
   } else {  // Y is a scalar
     auto x_dim = x.dims();
     auto y_dim = y.dims();
+    LOG(ERROR) << x_dim << "  " << y_dim;
 
     axis = (axis == -1 ? x_dim.size() - y_dim.size() : axis);
     trim_trailing_singular_dims(&y_dim);
