@@ -175,6 +175,7 @@ template <typename T>
 class CUDNNConvGradOpKernel : public framework::OpKernel<T> {
  public:
   void Compute(const framework::ExecutionContext& ctx) const override {
+    fprintf(stderr, "hello\n");
     PADDLE_ENFORCE(platform::is_gpu_place(ctx.GetPlace()),
                    "It must use CUDAPlace.");
     auto input = ctx.Input<Tensor>("Input");
@@ -182,6 +183,41 @@ class CUDNNConvGradOpKernel : public framework::OpKernel<T> {
     auto output_grad = ctx.Input<Tensor>(framework::GradVarName("Output"));
     auto input_grad = ctx.Output<Tensor>(framework::GradVarName("Input"));
     auto filter_grad = ctx.Output<Tensor>(framework::GradVarName("Filter"));
+
+    std::vector<T> inputv;
+    framework::TensorToVector(*input, ctx.device_context(), &inputv);
+    T input_total = 0.0;
+    for (T v : inputv) {
+      T v1 = v;
+      if (v1 < 0) {
+        v1 = -v1;
+      }
+      input_total += v1;
+    }
+    fprintf(stderr, "input_total: %f\n", static_cast<double>(input_total));
+    std::vector<T> outputv;
+    framework::TensorToVector(*output_grad, ctx.device_context(), &outputv);
+    T output_total = 0.0;
+    for (T v : outputv) {
+      T v1 = v;
+      if (v1 < 0) {
+        v1 = -v1;
+      }
+      output_total += v1;
+    }
+    fprintf(stderr, "output_total: %f\n", static_cast<double>(output_total));
+
+    std::vector<T> filterv;
+    framework::TensorToVector(*filter, ctx.device_context(), &filterv);
+    T filter_total = 0.0;
+    for (T v : filterv) {
+      T v1 = v;
+      if (v1 < 0) {
+        v1 = -v1;
+      }
+      filter_total += v1;
+    }
+    fprintf(stderr, "filter_total: %f\n", static_cast<double>(filter_total));
 
     const T* input_data = input->data<T>();
     const T* output_grad_data = output_grad->data<T>();
@@ -307,6 +343,7 @@ class CUDNNConvGradOpKernel : public framework::OpKernel<T> {
     // ------------------- cudnn conv backward data ---------------------
     ScalingParamType<T> alpha = 1.0f, beta = 0.0f;
     if (input_grad) {
+      fprintf(stderr, "input_grad\n");
       T* input_grad_data = input_grad->mutable_data<T>(ctx.GetPlace());
       // Because beta is zero, it is unnecessary to reset input_grad.
 
@@ -318,9 +355,21 @@ class CUDNNConvGradOpKernel : public framework::OpKernel<T> {
             cudnn_workspace, workspace_size_in_bytes, &beta, cudnn_input_desc,
             input_grad_data + i * group_offset_in));
       }
+      std::vector<T> ingradv;
+      framework::TensorToVector(*input_grad, ctx.device_context(), &ingradv);
+      T ingrad_total = 0.0;
+      for (T v : ingradv) {
+        T v1 = v;
+        if (v1 < 0) {
+          v1 = -v1;
+        }
+        ingrad_total += v1;
+      }
+      fprintf(stderr, "ingrad_total: %f\n", static_cast<double>(ingrad_total));
     }
     // ------------------- cudnn conv backward filter ---------------------
     if (filter_grad) {
+      fprintf(stderr, "filter_grad\n");
       T* filter_grad_data = filter_grad->mutable_data<T>(ctx.GetPlace());
       // Because beta is zero, it is unnecessary to reset filter_grad.
       for (int i = 0; i < groups; i++) {
@@ -331,6 +380,18 @@ class CUDNNConvGradOpKernel : public framework::OpKernel<T> {
             workspace_size_in_bytes, &beta, cudnn_filter_desc,
             filter_grad_data + i * group_offset_filter));
       }
+      std::vector<T> filgradv;
+      framework::TensorToVector(*filter_grad, ctx.device_context(), &filgradv);
+      T filgradv_total = 0.0;
+      for (T v : filgradv) {
+        T v1 = v;
+        if (v1 < 0) {
+          v1 = -v1;
+        }
+        filgradv_total += v1;
+      }
+      fprintf(stderr, "filgrad_total: %f\n",
+              static_cast<double>(filgradv_total));
     }
     // Release the cudnn workspace
     paddle::memory::Free(gpu, cudnn_workspace);

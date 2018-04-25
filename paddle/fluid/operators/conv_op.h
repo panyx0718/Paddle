@@ -358,6 +358,32 @@ class GemmConvGradKernel : public framework::OpKernel<T> {
         }
       }
     }
+    /*
+    std::vector<T> input_gradv;
+    framework::TensorToVector(filter, context.device_context(), &input_gradv);
+    T input_grad_total = 0.0;
+    for (T v : input_gradv) {
+      T v1 = v;
+      if (v1 < 0) {
+        v1 = -v1;
+      }
+      input_grad_total += v1;
+    }
+    fprintf(stderr, "input_grad_total: %f\n",
+            static_cast<double>(input_grad_total));
+
+    std::vector<T> input_gradv;
+    framework::TensorToVector(filter, context.device_context(), &input_gradv);
+    T input_grad_total = 0.0;
+    for (T v : input_gradv) {
+      T v1 = v;
+      if (v1 < 0) {
+        v1 = -v1;
+      }
+      input_grad_total += v1;
+    }
+    fprintf(stderr, "input_grad_total: %f\n",
+            static_cast<double>(input_grad_total));*/
   }
 };
 

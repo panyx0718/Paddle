@@ -45,11 +45,6 @@ struct BroadcastOpHandle : public OpHandleBase {
   const std::vector<Scope *> &local_scopes_;
   const std::vector<platform::Place> &places_;
 };
-
- private:
-  const std::vector<Scope *> &local_scopes_;
-  const std::vector<platform::Place> &places_;
-};
 }  // namespace details
 }  // namespace framework
 }  // namespace paddle
