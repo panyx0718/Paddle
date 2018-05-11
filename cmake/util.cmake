@@ -118,7 +118,6 @@ function(link_paddle_exe TARGET_NAME)
     if(WITH_MKLML AND MKLML_LIB_DIR AND MKLML_IOMP_LIB)
       target_link_libraries(${TARGET_NAME} "-L${MKLML_LIB_DIR} -liomp5 -Wl,--as-needed")
     endif()
-
     add_dependencies(${TARGET_NAME} ${external_project_dependencies})
 endfunction()
 
