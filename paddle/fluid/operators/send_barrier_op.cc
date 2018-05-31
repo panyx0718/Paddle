@@ -44,15 +44,24 @@ class SendBarrierOp : public framework::OperatorBase {
     // For profiling
     platform::RecordEvent record_event(Type(), &ctx);
 
+    std::unique_ptr<platform::RecordEvent> r1(
+        new platform::RecordEvent("CreateClient", nullptr));
     auto rpc_client = detail::RPCClient::GetInstance();
+    r1.reset(nullptr);
 
+    r1.reset(
+        new platform::RecordEvent("ClientWait", nullptr));
     // need to wait before sending send_barrier message
     PADDLE_ENFORCE(rpc_client->Wait());
+    r1.reset(nullptr);
+
     if (sync_mode) {
       for (auto& ep : eps) {
+        platform::RecordEvent record_event2("Send_" + ep, &ctx);
         VLOG(3) << "send barrier, ep: " << ep;
         rpc_client->AsyncSendBatchBarrier(ep);
       }
+      platform::RecordEvent record_event3("send_barrier_wait", &ctx);
       PADDLE_ENFORCE(rpc_client->Wait());
     }
   }

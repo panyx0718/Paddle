@@ -127,7 +127,7 @@ double Event::CpuElapsedMs(const Event& e) const {
 
 double Event::CudaElapsedMs(const Event& e) const {
 #ifdef PADDLE_WITH_CUDA
-  PADDLE_ENFORCE(e.has_cuda() && has_cuda());
+  if (!has_cuda_) return 0.0;
   PADDLE_ENFORCE(e.device() == device());
   PADDLE_ENFORCE(cudaEventSynchronize(event_));
   PADDLE_ENFORCE(cudaEventSynchronize(e.event()));

@@ -42,7 +42,7 @@ class RecvOp : public framework::OperatorBase {
     platform::DeviceContextPool& pool = platform::DeviceContextPool::Instance();
     auto& ctx = *pool.Get(place);
     // For profiling
-    platform::RecordEvent record_event(Type(), &ctx);
+    platform::RecordEvent record_event(Type() + "!!", &ctx);
 
     auto rpc_client = detail::RPCClient::GetInstance();
 

@@ -53,6 +53,7 @@ bool RPCClient::AsyncSendVariable(const std::string& ep,
 
   framework::AsyncIO([var_name_val, p_ctx, ep_val, p_scope, time_out, ch,
                       this] {
+    platform::RecordEvent r("AsyncSendVariable", nullptr);
     auto* var = p_scope->FindVar(var_name_val);
 
     ::grpc::ByteBuffer req;
@@ -107,6 +108,7 @@ bool RPCClient::AsyncGetVariable(const std::string& ep,
 
   framework::AsyncIO([var_name_val, ep_val, p_scope, p_ctx, time_out, ch,
                       this] {
+    platform::RecordEvent r("AsyncGetVariable", nullptr);
     // prepare input
     sendrecv::VariableMessage req;
     req.set_varname(var_name_val);
@@ -151,6 +153,7 @@ bool RPCClient::AsyncPrefetchVariable(const std::string& ep,
 
   framework::AsyncIO([in_var_name_val, out_var_name_val, ep_val, p_scope, p_ctx,
                       time_out, ch, this] {
+    platform::RecordEvent r("AsyncPrefetchVariable", nullptr);
     auto* var = p_scope->FindVar(in_var_name_val);
 
     ::grpc::ByteBuffer req;
@@ -180,6 +183,7 @@ bool RPCClient::AsyncPrefetchVariable(const std::string& ep,
 }
 
 void RPCClient::AsyncSendBatchBarrier(const std::string& ep, int64_t time_out) {
+  platform::RecordEvent r("AsyncSendBatchBarrier", nullptr);
   const auto ch = GetChannel(ep);
 
   BatchBarrierProcessor* s = new BatchBarrierProcessor(ch);
@@ -193,6 +197,7 @@ void RPCClient::AsyncSendBatchBarrier(const std::string& ep, int64_t time_out) {
 }
 
 void RPCClient::AsyncSendFetchBarrier(const std::string& ep, int64_t time_out) {
+  platform::RecordEvent r("AsyncSendFetchBarrier", nullptr);
   const auto ch = GetChannel(ep);
   FetchBarrierProcessor* s = new FetchBarrierProcessor(ch);
   s->Prepare(time_out);
@@ -204,6 +209,7 @@ void RPCClient::AsyncSendFetchBarrier(const std::string& ep, int64_t time_out) {
   req_count_++;
 }
 
+// TODO(panyx): Wait can be started earlier;
 bool RPCClient::Wait() {
   if (req_count_ <= 0) {
     return true;
@@ -238,6 +244,7 @@ bool RPCClient::Wait() {
 }
 
 bool RPCClient::Proceed() {
+  platform::RecordEvent r("Proceed", nullptr);
   void* tag = NULL;
   bool ok = false;
 
