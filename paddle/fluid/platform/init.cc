@@ -76,6 +76,7 @@ void InitP2P(std::vector<int> devices) {
 void InitDevices(bool init_p2p) {
   /*Init all available devices by default */
   std::vector<int> devices;
+  /*
 #ifdef PADDLE_WITH_CUDA
   try {
     int count = platform::GetCUDADeviceCount();
@@ -85,12 +86,14 @@ void InitDevices(bool init_p2p) {
   } catch (const std::exception &exp) {
     LOG(WARNING) << "Compiled with WITH_GPU, but no GPU found in runtime.";
   }
-#endif
+#endif*/
+
   InitDevices(init_p2p, devices);
 }
 
 void InitDevices(bool init_p2p, const std::vector<int> devices) {
   std::vector<platform::Place> places;
+  /*
   int count = 0;
 #ifdef PADDLE_WITH_CUDA
   try {
@@ -109,7 +112,7 @@ void InitDevices(bool init_p2p, const std::vector<int> devices) {
   }
   if (init_p2p) {
     InitP2P(devices);
-  }
+  }*/
   places.emplace_back(platform::CPUPlace());
   platform::DeviceContextPool::Init(places);
 #ifndef PADDLE_WITH_MKLDNN

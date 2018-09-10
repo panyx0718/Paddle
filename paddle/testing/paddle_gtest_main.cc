@@ -39,10 +39,6 @@ int main(int argc, char** argv) {
   google::ParseCommandLineFlags(&new_argc, &new_argv_address, false);
   paddle::memory::Used(paddle::platform::CPUPlace());
 
-#ifdef PADDLE_WITH_CUDA
-  paddle::memory::Used(paddle::platform::CUDAPlace(0));
-#endif
-
   paddle::framework::InitDevices(true);
   return RUN_ALL_TESTS();
 }
