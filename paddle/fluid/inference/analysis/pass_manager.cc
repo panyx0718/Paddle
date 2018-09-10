@@ -37,6 +37,7 @@ void DfgPassManager::RunAll() {
   for (auto& pass : data_) {
     LOG(WARNING) << "Running Analysis pass [" << pass->repr() << "]";
     pass->Run(argument_->main_dfg.get());
+    LOG(WARNING) << "Done Running Analysis pass [" << pass->repr() << "]";
   }
 }
 

@@ -29,7 +29,7 @@
 DEFINE_string(infer_ditu_rnn_model, "", "model path for ditu RNN");
 DEFINE_string(infer_ditu_rnn_data, "", "data path for ditu RNN");
 DEFINE_int32(batch_size, 10, "batch size.");
-DEFINE_int32(repeat, 1, "Running the inference program repeat times.");
+DEFINE_int32(repeat, 100000, "Running the inference program repeat times.");
 
 namespace paddle {
 namespace inference {
@@ -39,18 +39,10 @@ using namespace framework;  // NOLINT
 
 TEST(Analyzer, analysis_without_tensorrt) {
   FLAGS_IA_enable_tensorrt_subgraph_engine = false;
-  Argument argument;
-  argument.fluid_model_dir.reset(new std::string(FLAGS_inference_model_dir));
-  Analyzer analyser;
-  analyser.Run(&argument);
 }
 
 TEST(Analyzer, analysis_with_tensorrt) {
   FLAGS_IA_enable_tensorrt_subgraph_engine = true;
-  Argument argument;
-  argument.fluid_model_dir.reset(new std::string(FLAGS_inference_model_dir));
-  Analyzer analyser;
-  analyser.Run(&argument);
 }
 
 void TestWord2vecPrediction(const std::string &model_path) {
@@ -292,6 +284,7 @@ void TestDituRNNPrediction(const std::string &model_path,
 
   Timer timer;
   timer.tic();
+  LOG(ERROR) << "start timing";
   for (int i = 0; i < num_times; i++) {
     predictor->Run(input_slots, &outputs);
   }
@@ -343,20 +336,6 @@ void TestDituRNNPrediction(const std::string &model_path,
     EXPECT_EQ(num_ops,
               13);  // After graph optimization, only 13 operators exists.
   }
-}
-
-// Directly infer with the original model.
-TEST(Analyzer, DituRNN_without_analysis) {
-  TestDituRNNPrediction(FLAGS_infer_ditu_rnn_model, FLAGS_infer_ditu_rnn_data,
-                        FLAGS_batch_size, false, false, FLAGS_repeat);
-}
-
-// Inference with the original model with the analysis turned on, the analysis
-// module will transform the program to a data flow graph.
-TEST(Analyzer, DituRNN_with_analysis) {
-  LOG(INFO) << "ditu rnn with analysis";
-  TestDituRNNPrediction(FLAGS_infer_ditu_rnn_model, FLAGS_infer_ditu_rnn_data,
-                        FLAGS_batch_size, true, false, FLAGS_repeat);
 }
 
 // Inference with analysis and IR. The IR module will fuse some large kernels.

@@ -14,6 +14,8 @@
 
 #include "paddle/fluid/inference/analysis/analyzer.h"
 #include <string>
+#include <vector>
+
 #include "paddle/fluid/inference/analysis/data_flow_graph_to_fluid_pass.h"
 #include "paddle/fluid/inference/analysis/dfg_graphviz_draw_pass.h"
 #include "paddle/fluid/inference/analysis/fluid_to_data_flow_graph_pass.h"
@@ -64,7 +66,7 @@ class DfgPassManagerImpl final : public DfgPassManager {
   void AddPass(const std::string& name, Pass* pass) {
     VLOG(3) << "Adding pass " << name;
     Register(name, pass);
-    AddGraphvizDebugerPass(pass);
+    // AddGraphvizDebugerPass(pass);
   }
 
   void TryAddTensorRtPass() {
@@ -112,7 +114,6 @@ void Analyzer::Run(Argument* argument) {
                     "mul_lstm_fuse_pass", "graph_viz_pass",        //
                     "seq_concat_fc_fuse_pass", "graph_viz_pass",   //
                     "fc_fuse_pass", "graph_viz_pass"               //
-
                 }));
 
   for (auto& x : data_) {
