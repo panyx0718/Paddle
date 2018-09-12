@@ -23,29 +23,32 @@ namespace paddle {
 namespace operators {
 
 void AttentionLSTMOp::InferShape(framework::InferShapeContext* ctx) const {
-  PADDLE_ENFORCE(ctx->HasInput("X"),
-                 "Input(X) of AttentionLSTM should not be null.");
-  PADDLE_ENFORCE(ctx->HasInput("C0"),
-                 "Input(C0) of AttentionLSTM should not be null.");
-  PADDLE_ENFORCE(ctx->HasInput("LSTMWeight"),
-                 "Input(LSTMWeight) of AttentionLSTM should not be null.");
-  PADDLE_ENFORCE(ctx->HasInput("LSTMBias"),
-                 "Input(LSTMBias) of AttentionLSTM should not be null.");
-  PADDLE_ENFORCE(ctx->HasInput("AttentionWeight"),
-                 "Input(AttentionWeight) of AttentionLSTM should not be null.");
+  PADDLE_ENFORCE_ONCE(ctx->HasInput("X"),
+                      "Input(X) of AttentionLSTM should not be null.");
+  PADDLE_ENFORCE_ONCE(ctx->HasInput("C0"),
+                      "Input(C0) of AttentionLSTM should not be null.");
+  PADDLE_ENFORCE_ONCE(ctx->HasInput("LSTMWeight"),
+                      "Input(LSTMWeight) of AttentionLSTM should not be null.");
+  PADDLE_ENFORCE_ONCE(ctx->HasInput("LSTMBias"),
+                      "Input(LSTMBias) of AttentionLSTM should not be null.");
+  PADDLE_ENFORCE_ONCE(
+      ctx->HasInput("AttentionWeight"),
+      "Input(AttentionWeight) of AttentionLSTM should not be null.");
 
-  PADDLE_ENFORCE(ctx->HasOutput("Hidden"),
-                 "Output(Hidden) of AttentionLSTM should not be null.");
-  PADDLE_ENFORCE(ctx->HasOutput("Cell"),
-                 "Output(Cell) of AttentionLSTM should not be null.");
-  PADDLE_ENFORCE(ctx->HasOutput("AttentionedX"),
-                 "Output(AttentionedX) of AttentionLSTM should not be null.");
-  PADDLE_ENFORCE(ctx->HasOutput("AttentionFCOut"),
-                 "Output(AttentionFCOut) of AttentionLSTM should not be null.");
-  PADDLE_ENFORCE(ctx->HasOutput("LSTMX"),
-                 "Output(LSTMX) of AttentionLSTM should not be null.");
-  PADDLE_ENFORCE(ctx->HasOutput("LSTMOUT"),
-                 "Output(LSTMOUT) of AttentionLSTM should not be null.");
+  PADDLE_ENFORCE_ONCE(ctx->HasOutput("Hidden"),
+                      "Output(Hidden) of AttentionLSTM should not be null.");
+  PADDLE_ENFORCE_ONCE(ctx->HasOutput("Cell"),
+                      "Output(Cell) of AttentionLSTM should not be null.");
+  PADDLE_ENFORCE_ONCE(
+      ctx->HasOutput("AttentionedX"),
+      "Output(AttentionedX) of AttentionLSTM should not be null.");
+  PADDLE_ENFORCE_ONCE(
+      ctx->HasOutput("AttentionFCOut"),
+      "Output(AttentionFCOut) of AttentionLSTM should not be null.");
+  PADDLE_ENFORCE_ONCE(ctx->HasOutput("LSTMX"),
+                      "Output(LSTMX) of AttentionLSTM should not be null.");
+  PADDLE_ENFORCE_ONCE(ctx->HasOutput("LSTMOUT"),
+                      "Output(LSTMOUT) of AttentionLSTM should not be null.");
 
   auto x_dims = ctx->GetInputDim("X");
   const int M = x_dims[1];
@@ -67,9 +70,9 @@ void AttentionLSTMOp::InferShape(framework::InferShapeContext* ctx) const {
   PADDLE_ENFORCE_EQ(c_dims[1], D, "C0 dims should be N x %d.", D);
   if (ctx->HasInput("H0")) {
     auto h_dims = ctx->GetInputDim("H0");
-    PADDLE_ENFORCE(h_dims == c_dims,
-                   "The dimension of Input(H0) and Input(C0) "
-                   "should be the same.");
+    PADDLE_ENFORCE_ONCE(h_dims == c_dims,
+                        "The dimension of Input(H0) and Input(C0) "
+                        "should be the same.");
   }
 
   auto atten_w_dims = ctx->GetInputDim("AttentionWeight");
@@ -99,7 +102,7 @@ void AttentionLSTMOp::InferShape(framework::InferShapeContext* ctx) const {
 
   if (ctx->HasInput("AttentionScalarBias")) {
     auto dims = ctx->GetInputDim("AttentionScalarBias");
-    PADDLE_ENFORCE(
+    PADDLE_ENFORCE_ONCE(
         ctx->HasInput("AttentionScalar"),
         "AttentionScalar should not be null when have AttentionScalarBias.");
     PADDLE_ENFORCE_EQ(dims.size(), 2,

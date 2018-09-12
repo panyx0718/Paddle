@@ -123,8 +123,8 @@ template <typename T>
 class FCOpKernel : public framework::OpKernel<T> {
  public:
   void Compute(const paddle::framework::ExecutionContext& ctx) const override {
-    PADDLE_ENFORCE(platform::is_cpu_place(ctx.GetPlace()),
-                   "It must use CPUPlace.");
+    PADDLE_ENFORCE_ONCE(platform::is_cpu_place(ctx.GetPlace()),
+                        "It must use CPUPlace.");
     auto input = ctx.Input<Tensor>("Input");
     auto w = ctx.Input<Tensor>("W");
     auto bias = ctx.Input<Tensor>("Bias");

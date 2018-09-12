@@ -27,13 +27,13 @@ void FusionSeqExpandConcatFCOp::InferShape(
   PADDLE_ENFORCE_GT(
       ctx->Inputs("X").size(), 1UL,
       "Inputs(X) of FusionSeqExpandConcatFCOp should larger than 1.");
-  PADDLE_ENFORCE(
+  PADDLE_ENFORCE_ONCE(
       ctx->HasInput("FCWeight"),
       "Input(FCWeight) of FusionSeqExpandConcatFCOp should not be null.");
-  PADDLE_ENFORCE(
+  PADDLE_ENFORCE_ONCE(
       ctx->HasOutput("Out"),
       "Output(Out) of FusionSeqExpandConcatFCOp should not be null.");
-  PADDLE_ENFORCE(
+  PADDLE_ENFORCE_ONCE(
       ctx->HasOutput("FCOut"),
       "Output(FCOut) of FusionSeqExpandConcatFCOp should not be null.");
 
@@ -49,8 +49,8 @@ void FusionSeqExpandConcatFCOp::InferShape(
                     "FC height should be sum of all inputs width.");
   if (ctx->HasInput("FCBias")) {
     auto b_dims = ctx->GetInputDim("FCBias");
-    PADDLE_ENFORCE(b_dims.size() == 1 || b_dims.size() == 2,
-                   "b_dims should be 1 or 2, get %d", b_dims.size());
+    PADDLE_ENFORCE_ONCE(b_dims.size() == 1 || b_dims.size() == 2,
+                        "b_dims should be 1 or 2, get %d", b_dims.size());
     if (b_dims.size() == 1) {
       PADDLE_ENFORCE_EQ(b_dims[0], D, "FCBias shapes must be %d.", D);
     } else {

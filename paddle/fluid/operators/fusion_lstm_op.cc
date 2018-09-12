@@ -24,43 +24,44 @@ namespace paddle {
 namespace operators {
 
 void FusionLSTMOp::InferShape(framework::InferShapeContext* ctx) const {
-  PADDLE_ENFORCE(ctx->HasInput("X"), "Input(X) of LSTM should not be null.");
-  PADDLE_ENFORCE(ctx->HasInput("WeightX"),
-                 "Input(WeightX) of LSTM should not be null.");
-  PADDLE_ENFORCE(ctx->HasInput("WeightH"),
-                 "Input(WeightH) of LSTM should not be null.");
-  PADDLE_ENFORCE(ctx->HasInput("Bias"),
-                 "Input(Bias) of LSTM should not be null.");
+  PADDLE_ENFORCE_ONCE(ctx->HasInput("X"),
+                      "Input(X) of LSTM should not be null.");
+  PADDLE_ENFORCE_ONCE(ctx->HasInput("WeightX"),
+                      "Input(WeightX) of LSTM should not be null.");
+  PADDLE_ENFORCE_ONCE(ctx->HasInput("WeightH"),
+                      "Input(WeightH) of LSTM should not be null.");
+  PADDLE_ENFORCE_ONCE(ctx->HasInput("Bias"),
+                      "Input(Bias) of LSTM should not be null.");
 
-  PADDLE_ENFORCE(ctx->HasOutput("XX"),
-                 "Output(XX) of LSTM should not be null.");
-  PADDLE_ENFORCE(ctx->HasOutput("Hidden"),
-                 "Output(Hidden) of LSTM should not be null.");
-  PADDLE_ENFORCE(ctx->HasOutput("Cell"),
-                 "Output(Cell) of LSTM should not be null.");
-  PADDLE_ENFORCE(ctx->HasOutput("BatchedInput"),
-                 "Output(BatchedInput) of LSTM should not be null.");
-  PADDLE_ENFORCE(ctx->HasOutput("BatchedHidden"),
-                 "Output(BatchedHidden) of LSTM should not be null.");
-  PADDLE_ENFORCE(ctx->HasOutput("BatchedCell"),
-                 "Output(BatchedCell) of LSTM should not be null.");
-  PADDLE_ENFORCE(ctx->HasOutput("ReorderedH0"),
-                 "Output(ReorderedH0) of LSTM should not be null.");
-  PADDLE_ENFORCE(ctx->HasOutput("ReorderedC0"),
-                 "Output(ReorderedC0) of LSTM should not be null.");
+  PADDLE_ENFORCE_ONCE(ctx->HasOutput("XX"),
+                      "Output(XX) of LSTM should not be null.");
+  PADDLE_ENFORCE_ONCE(ctx->HasOutput("Hidden"),
+                      "Output(Hidden) of LSTM should not be null.");
+  PADDLE_ENFORCE_ONCE(ctx->HasOutput("Cell"),
+                      "Output(Cell) of LSTM should not be null.");
+  PADDLE_ENFORCE_ONCE(ctx->HasOutput("BatchedInput"),
+                      "Output(BatchedInput) of LSTM should not be null.");
+  PADDLE_ENFORCE_ONCE(ctx->HasOutput("BatchedHidden"),
+                      "Output(BatchedHidden) of LSTM should not be null.");
+  PADDLE_ENFORCE_ONCE(ctx->HasOutput("BatchedCell"),
+                      "Output(BatchedCell) of LSTM should not be null.");
+  PADDLE_ENFORCE_ONCE(ctx->HasOutput("ReorderedH0"),
+                      "Output(ReorderedH0) of LSTM should not be null.");
+  PADDLE_ENFORCE_ONCE(ctx->HasOutput("ReorderedC0"),
+                      "Output(ReorderedC0) of LSTM should not be null.");
 
   auto x_dims = ctx->GetInputDim("X");
   PADDLE_ENFORCE_EQ(x_dims.size(), 2, "Input(X)'s rank must be 2.");
 
   if (ctx->HasInput("H0")) {
-    PADDLE_ENFORCE(ctx->HasInput("C0"),
-                   "Input(Cell) and Input(Hidden) of LSTM should not "
-                   "be null at the same time.");
+    PADDLE_ENFORCE_ONCE(ctx->HasInput("C0"),
+                        "Input(Cell) and Input(Hidden) of LSTM should not "
+                        "be null at the same time.");
     auto h_dims = ctx->GetInputDim("H0");
     auto c_dims = ctx->GetInputDim("C0");
-    PADDLE_ENFORCE(h_dims == c_dims,
-                   "The dimension of Input(H0) and Input(C0) "
-                   "should be the same.");
+    PADDLE_ENFORCE_ONCE(h_dims == c_dims,
+                        "The dimension of Input(H0) and Input(C0) "
+                        "should be the same.");
   }
 
   auto wx_dims = ctx->GetInputDim("WeightX");
@@ -89,8 +90,8 @@ void FusionLSTMOp::InferShape(framework::InferShapeContext* ctx) const {
   PADDLE_ENFORCE_EQ(b_dims[0], 1,
                     "The first dimension of Input(Bias) should be 1.");
 
-  PADDLE_ENFORCE(!ctx->Attrs().Get<bool>("use_peepholes"),
-                 "Do not support peephole yet.");
+  PADDLE_ENFORCE_ONCE(!ctx->Attrs().Get<bool>("use_peepholes"),
+                      "Do not support peephole yet.");
   PADDLE_ENFORCE_EQ(b_dims[1], 4 * frame_size,
                     "The second dimension of Input(Bias) should be "
                     "4 * %d if disable peepholes connection",

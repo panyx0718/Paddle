@@ -260,6 +260,20 @@ inline void throw_on_error(T e) {
     }                                                                   \
   } while (false)
 
+#define PADDLE_ENFORCE_ONCE(...)                                        \
+  do {                                                                  \
+    try {                                                               \
+      static bool called = false;                                       \
+      if (!called) {                                                    \
+        called = true;                                                  \
+        ::paddle::platform::throw_on_error(__VA_ARGS__);                \
+      }                                                                 \
+    } catch (...) {                                                     \
+      throw ::paddle::platform::EnforceNotMet(std::current_exception(), \
+                                              __FILE__, __LINE__);      \
+    }                                                                   \
+  } while (false)
+
 #define PADDLE_THROW_EOF()                                                     \
   do {                                                                         \
     throw ::paddle::platform::EOFException("There is no next data.", __FILE__, \
@@ -317,7 +331,9 @@ inline void throw_on_error(T e) {
 
 #define __PADDLE_BINARY_COMPARE(__VAL0, __VAL1, __CMP, __INV_CMP, ...)  \
   do {                                                                  \
-    if (UNLIKELY(!((__VAL0)__CMP(__VAL1)))) {                           \
+    static bool called = false;                                         \
+    if (UNLIKELY(!called && !((__VAL0)__CMP(__VAL1)))) {                \
+      called = true;                                                    \
       PADDLE_THROW("Enforce failed. Expected %s " #__CMP                \
                    " %s, but received %s:%s " #__INV_CMP " %s:%s.\n%s", \
                    #__VAL0, #__VAL1, #__VAL0,                           \

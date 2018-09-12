@@ -35,15 +35,15 @@ class FeedOp : public framework::OperatorBase {
     auto feed_var_name = Input("X");
     auto *feed_var = scope.FindVar(feed_var_name);
 
-    PADDLE_ENFORCE(feed_var != nullptr,
-                   "Cannot find feed_var in scope, feed_var_name is %s",
-                   feed_var_name);
+    PADDLE_ENFORCE_ONCE(feed_var != nullptr,
+                        "Cannot find feed_var in scope, feed_var_name is %s",
+                        feed_var_name);
 
     auto out_name = this->Output("Out");
     auto *out_var = scope.FindVar(out_name);
-    PADDLE_ENFORCE(out_var != nullptr,
-                   "Cannot find out_var in scope, out_var_name is %s",
-                   out_name);
+    PADDLE_ENFORCE_ONCE(out_var != nullptr,
+                        "Cannot find out_var in scope, out_var_name is %s",
+                        out_name);
 
     auto col = Attr<int>("col");
 
